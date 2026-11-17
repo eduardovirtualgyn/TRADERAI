@@ -121,9 +121,9 @@ docker-compose up --build -d
 
 Serviços inicializados:
 - **Frontend Dashboard:** porta `3000` (`http://localhost:3000`)
-- **FastAPI Backend:** porta `8000` (`http://localhost:8000`)
-- **PostgreSQL:** porta `5432`
-- **Redis:** porta `6379`
+- **FastAPI Backend (Swagger):** porta `8001` (`http://localhost:8001/docs`)
+- **PostgreSQL:** porta `5433`
+- **Redis:** porta `6380`
 
 ---
 

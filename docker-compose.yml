@@ -8,7 +8,7 @@ services:
     container_name: odd_even_ai_backend
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8001}:8000"
     env_file:
       - .env
     environment:
@@ -31,9 +31,9 @@ services:
     container_name: odd_even_ai_frontend
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3000}:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+      - BACKEND_INTERNAL_URL=http://backend:8000/api/v1
     depends_on:
       - backend
     networks:
@@ -48,7 +48,7 @@ services:
       POSTGRES_PASSWORD: deriv_pass
       POSTGRES_DB: deriv_trader
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -64,7 +64,7 @@ services:
     container_name: odd_even_ai_redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6380}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
