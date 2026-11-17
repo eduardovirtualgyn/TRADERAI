@@ -54,6 +54,15 @@ class DerivWebSocketClient:
         self._active_symbols: List[str] = []
 
     @property
+    def is_connected(self) -> bool:
+        """Indica se a conexão WebSocket com a Deriv está ativa."""
+        return (
+            self.state in (DerivConnectionState.CONNECTED, DerivConnectionState.AUTHORIZED)
+            and self._ws is not None
+            and not getattr(self._ws, "closed", True)
+        )
+
+    @property
     def is_authorized(self) -> bool:
         """Indica se o cliente está autenticado em conta virtual DEMO."""
         return self.state == DerivConnectionState.AUTHORIZED and self._auth_info is not None

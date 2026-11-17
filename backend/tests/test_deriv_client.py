@@ -187,5 +187,16 @@ def test_client_initial_state():
     """Valida estado inicial e propriedades do cliente."""
     client = DerivWebSocketClient(ws_url="wss://ws.derivws.com/websockets/v3", app_id=1089)
     assert client.state == DerivConnectionState.DISCONNECTED
+    assert client.is_connected is False
     assert client.is_authorized is False
     assert client.auth_info is None
+
+    # Valida detecção ativa da propriedade is_connected
+    client.state = DerivConnectionState.CONNECTED
+    fake_ws = MagicMock()
+    fake_ws.closed = False
+    client._ws = fake_ws
+    assert client.is_connected is True
+
+    fake_ws.closed = True
+    assert client.is_connected is False
