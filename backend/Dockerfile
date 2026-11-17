@@ -18,8 +18,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copia o código-fonte da aplicação
-COPY app ./app
+# Estrutura o pacote backend.app para compatibilidade absoluta com os imports
+RUN mkdir -p /app/backend
+COPY app ./backend/app
+RUN touch /app/backend/__init__.py
+RUN ln -s /app/backend/app /app/app
+
+# Adiciona /app ao PYTHONPATH
+ENV PYTHONPATH=/app
 
 # Usuário não-root para segurança
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
@@ -27,5 +33,5 @@ USER appuser
 
 EXPOSE 8000
 
-# Execução do Uvicorn
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Execução do Uvicorn apontando para backend.app.main:app
+CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -9,13 +9,14 @@ services:
     restart: unless-stopped
     ports:
       - "${BACKEND_PORT:-8001}:8000"
-    env_file:
-      - .env
     environment:
       - ACCOUNT_MODE=DEMO
       - ALLOW_REAL_ACCOUNT=False
       - DATABASE_URL=postgresql://deriv_user:deriv_pass@postgres:5432/deriv_trader
       - REDIS_URL=redis://redis:6379/0
+      - DERIV_DEMO_TOKEN=${DERIV_DEMO_TOKEN:-}
+      - DERIV_APP_ID=${DERIV_APP_ID:-1089}
+      - DERIV_WS_URL=${DERIV_WS_URL:-wss://ws.derivws.com/websockets/v3}
     depends_on:
       postgres:
         condition: service_healthy
