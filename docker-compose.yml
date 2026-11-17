@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: odd_even_ai_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - ACCOUNT_MODE=DEMO
+      - ALLOW_REAL_ACCOUNT=False
+      - DATABASE_URL=postgresql://deriv_user:deriv_pass@postgres:5432/deriv_trader
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - trader_net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: odd_even_ai_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+    depends_on:
+      - backend
+    networks:
+      - trader_net
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: odd_even_ai_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: deriv_user
+      POSTGRES_PASSWORD: deriv_pass
+      POSTGRES_DB: deriv_trader
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U deriv_user -d deriv_trader"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - trader_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: odd_even_ai_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - trader_net
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  trader_net:
+    driver: bridge
