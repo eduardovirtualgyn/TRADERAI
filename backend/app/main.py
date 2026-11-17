@@ -35,7 +35,47 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.critical("🚨 FALHA CRÍTICA DE SEGURANÇA: Tentativa de iniciar em modo não-DEMO.")
         raise TraderSecurityError("Operação bloqueada: apenas o modo DEMO é permitido.")
 
+    # Conexão automática em segundo plano com a Deriv API (não-bloqueante)
+    connect_task = None
+    if settings.deriv_demo_token and settings.deriv_demo_token != "seu_token_demo_aqui":
+        import asyncio
+        from backend.app.api.deps import (
+            get_deriv_client,
+            get_risk_manager,
+            get_tick_collector,
+        )
+
+        async def auto_connect_deriv():
+            try:
+                await asyncio.sleep(0.5)
+                client = get_deriv_client()
+                _ = get_tick_collector()  # Realiza o bind de callbacks
+                logger.info("Iniciando auto-conexão WebSocket com a Deriv...")
+                await client.connect()
+                auth_info = await client.authorize()
+                await client.subscribe_ticks(settings.deriv_default_symbol)
+                risk_mgr = get_risk_manager()
+                if auth_info.balance > 0:
+                    risk_mgr.balance_usd = auth_info.balance
+                logger.info(
+                    "✅ Deriv WebSocket conectado e autenticado com sucesso em DEMO (%s)! Saldo: US$ %.2f",
+                    auth_info.loginid,
+                    auth_info.balance,
+                )
+            except Exception as exc:
+                logger.warning("Auto-conexão Deriv em segundo plano adiada: %s", exc)
+
+        connect_task = asyncio.create_task(auto_connect_deriv())
+
     yield
+
+    if connect_task and not connect_task.done():
+        connect_task.cancel()
+
+    from backend.app.api.deps import get_deriv_client
+    client = get_deriv_client()
+    if client.is_connected:
+        await client.disconnect()
 
     logger.info("🛑 FINALIZANDO ODD/EVEN AI TRADER COM SEGURANÇA.")
 

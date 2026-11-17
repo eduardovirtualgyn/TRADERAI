@@ -34,6 +34,18 @@ async function fetchJson<T>(endpoint: string, options?: RequestInit): Promise<T>
 export const api = {
   // Deriv
   getDerivStatus: () => fetchJson<DerivStatus>("/deriv/status"),
+  connectDeriv: (token?: string, symbol?: string) =>
+    fetchJson<{ success: boolean; state: string; is_authorized: boolean; loginid: string; balance: number }>(
+      "/deriv/connect",
+      {
+        method: "POST",
+        body: JSON.stringify({ token, symbol }),
+      }
+    ),
+  disconnectDeriv: () =>
+    fetchJson<{ success: boolean; state: string }>("/deriv/disconnect", {
+      method: "POST",
+    }),
 
   // Risco
   getRiskStatus: () => fetchJson<RiskStatus>("/risk/status"),

@@ -74,6 +74,11 @@ export default function DashboardPage() {
     }
   };
 
+  const handleConnectDeriv = async (token?: string) => {
+    await api.connectDeriv(token, selectedSymbol);
+    await refreshAll();
+  };
+
   return (
     <div className="min-h-screen bg-dark-900 flex flex-col font-sans">
       {/* Persistent Navigation Header */}
@@ -82,6 +87,7 @@ export default function DashboardPage() {
         riskStatus={riskStatus}
         onPanicStop={handlePanicStop}
         onToggleKillSwitch={handleToggleKillSwitch}
+        onConnectDeriv={handleConnectDeriv}
       />
 
       {/* Main Container */}
