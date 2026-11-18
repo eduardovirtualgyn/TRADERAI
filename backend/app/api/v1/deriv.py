@@ -109,7 +109,14 @@ async def connect_deriv(
                 detail=fallback_err.to_dict(),
             ) from exc
 
-    # ETAPA 2: Autenticação da Conta DEMO
+    # ETAPA 2: Subscrição do feed de cotações (Inicia o streaming imediatamente)
+    target_symbol = payload.symbol or settings.deriv_default_symbol
+    try:
+        await client.subscribe_ticks(target_symbol)
+    except Exception as exc:
+        logger.warning("Aviso: falha ao assinar ticks de %s imediatamente: %s", target_symbol, exc)
+
+    # ETAPA 3: Autenticação da Conta DEMO
     try:
         auth_info = await client.authorize(token=token_to_use)
     except TraderSecurityError as sec_err:
@@ -147,15 +154,8 @@ async def connect_deriv(
             },
         ) from exc
 
-    # ETAPA 3: Subscrição do feed de cotações
-    target_symbol = payload.symbol or settings.deriv_default_symbol
-    try:
-        await client.subscribe_ticks(target_symbol)
-    except Exception as exc:
-        logger.warning("Aviso: falha ao assinar ticks de %s imediatamente: %s", target_symbol, exc)
-
     # ETAPA 4: Atualização de saldo
-    if auth_info.balance > 0:
+    if auth_info and auth_info.balance > 0:
         risk_manager.balance_usd = auth_info.balance
 
     logger.info(

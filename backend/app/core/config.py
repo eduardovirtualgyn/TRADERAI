@@ -25,10 +25,10 @@ class Settings(BaseModel):
         description="Flag de bloqueio de conta real. NUNCA deve ser True.",
     )
 
-    # Deriv WebSocket API
+    # Deriv WebSocket API (Novo endpoint oficial Options API / Public Data)
     deriv_ws_url: str = Field(
-        default="wss://ws.derivws.com/websockets/v3",
-        description="Endpoint oficial da Deriv WebSocket API",
+        default="wss://api.derivws.com/trading/v1/options/ws/public",
+        description="Endpoint oficial da Deriv WebSocket API (Options / Public Data)",
     )
     deriv_app_id: int = Field(
         default=1089,

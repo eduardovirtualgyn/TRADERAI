@@ -57,8 +57,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     logger.info("Tentativa %d/%d de auto-conexão WebSocket com a Deriv...", attempt, max_attempts)
                     if not client.is_connected:
                         await client.connect()
-                    auth_info = await client.authorize()
                     await client.subscribe_ticks(settings.deriv_default_symbol)
+                    auth_info = await client.authorize()
                     risk_mgr = get_risk_manager()
                     if auth_info.balance > 0:
                         risk_mgr.balance_usd = auth_info.balance
