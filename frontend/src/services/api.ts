@@ -78,6 +78,11 @@ export const api = {
     fetchJson<{ success: boolean; state: string }>("/deriv/disconnect", {
       method: "POST",
     }),
+  setDemoBalance: (balance: number) =>
+    fetchJson<{ success: boolean; balance: number; message: string }>("/deriv/balance", {
+      method: "POST",
+      body: JSON.stringify({ balance }),
+    }),
 
   // Risco
   getRiskStatus: () => fetchJson<RiskStatus>("/risk/status"),

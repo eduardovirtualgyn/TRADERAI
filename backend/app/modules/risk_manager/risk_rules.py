@@ -44,7 +44,7 @@ class RiskManager:
         max_consecutive_losses: int = 3,
         max_daily_loss_usd: float = 25.00,
         ban_martingale: bool = True,
-        initial_balance_usd: float = 1000.00,
+        initial_balance_usd: float = 100.00,
         kill_switch_initially_active: bool = False,
         cooldown_duration_seconds: float = 60.0,
     ):

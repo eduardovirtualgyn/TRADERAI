@@ -31,6 +31,7 @@ def get_risk_manager() -> RiskManager:
     if _risk_manager_instance is None:
         settings = get_settings()
         _risk_manager_instance = RiskManager(
+            initial_balance_usd=settings.deriv_demo_initial_balance,
             max_stake_usd=settings.risk_max_stake_usd,
             max_stake_percent=settings.risk_max_stake_percent,
             max_consecutive_losses=settings.risk_max_consecutive_losses,

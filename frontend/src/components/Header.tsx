@@ -36,7 +36,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   const isConnected = derivStatus?.is_connected ?? false;
   const isAuthorized = derivStatus?.is_authorized ?? false;
-  const balance = riskStatus?.balance_usd ?? derivStatus?.account_info?.balance ?? 1000.0;
+  const balance = riskStatus?.balance_usd ?? derivStatus?.account_info?.balance ?? 100.0;
   const killSwitchActive = riskStatus?.kill_switch_active ?? false;
 
   const handlePanicClick = () => {

@@ -42,6 +42,10 @@ class Settings(BaseModel):
         default="R_100",
         description="Símbolo sintético padrão (ex: Volatility 100 Index)",
     )
+    deriv_demo_initial_balance: float = Field(
+        default=100.00,
+        description="Saldo inicial configurado para a conta DEMO em USD",
+    )
 
     # Parâmetros de Gestão de Risco
     risk_max_stake_usd: float = Field(

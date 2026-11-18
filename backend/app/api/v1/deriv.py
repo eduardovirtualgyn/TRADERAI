@@ -187,3 +187,24 @@ async def disconnect_deriv(
         "is_connected": False,
         "is_authorized": False,
     }
+
+
+class SetBalancePayload(BaseModel):
+    balance: float = Field(default=100.0, gt=0, le=100000.0, description="Novo saldo DEMO em USD")
+
+
+@router.post("/balance", summary="Define o saldo da conta DEMO manualmente")
+def set_demo_balance(
+    payload: SetBalancePayload,
+    client: DerivWebSocketClient = Depends(get_deriv_client),
+    risk_manager: RiskManager = Depends(get_risk_manager),
+) -> dict:
+    """Atualiza o saldo demonstrativo em memória e no gerenciador de risco."""
+    new_bal = client.set_balance(payload.balance)
+    risk_manager.balance_usd = new_bal
+    logger.info("Saldo DEMO atualizado manualmente para US$ %.2f", new_bal)
+    return {
+        "success": True,
+        "balance": new_bal,
+        "message": f"Saldo DEMO atualizado para US$ {new_bal:.2f}",
+    }

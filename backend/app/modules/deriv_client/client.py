@@ -72,6 +72,10 @@ class DerivWebSocketClient:
         self._pending_requests: Dict[int, asyncio.Future] = {}
         self._tick_callbacks: List[Callable[[TickData], None]] = []
         self._listener_task: Optional[asyncio.Task] = None
+        self._heartbeat_task: Optional[asyncio.Task] = None
+        self._reconnect_task: Optional[asyncio.Task] = None
+        self._should_reconnect: bool = True
+        self._is_reconnecting: bool = False
         self._active_symbols: List[str] = []
 
     @property
@@ -240,12 +244,16 @@ class DerivWebSocketClient:
                     additional_headers=headers,
                     ssl=ssl_ctx,
                     open_timeout=8.0,
-                    ping_interval=30,
-                    ping_timeout=10,
+                    ping_interval=None,
+                    ping_timeout=None,
                 )
                 self.state = DerivConnectionState.CONNECTED
+                self._should_reconnect = True
                 logger.info("✅ Conexão WebSocket estabelecida com sucesso via %s.", url)
                 self._listener_task = asyncio.create_task(self._listen_loop())
+                if self._heartbeat_task and not self._heartbeat_task.done():
+                    self._heartbeat_task.cancel()
+                self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
                 return
             except Exception as exc:
                 last_error = exc
@@ -265,7 +273,14 @@ class DerivWebSocketClient:
     async def disconnect(self) -> None:
         """Encerra a conexão WebSocket e cancela tarefas de segundo plano."""
         logger.info("Desconectando cliente Deriv...")
+        self._should_reconnect = False
         self.state = DerivConnectionState.DISCONNECTED
+
+        if self._heartbeat_task and not self._heartbeat_task.done():
+            self._heartbeat_task.cancel()
+
+        if self._reconnect_task and not self._reconnect_task.done():
+            self._reconnect_task.cancel()
 
         if self._listener_task and not self._listener_task.done():
             self._listener_task.cancel()
@@ -354,7 +369,7 @@ class DerivWebSocketClient:
                         is_virtual=True,
                         loginid=str(demo_acc.get("id") or demo_acc.get("account_id") or "VRTC_DEMO"),
                         currency=str(demo_acc.get("currency", "USD")),
-                        balance=float(demo_acc.get("balance", 1000.0)),
+                        balance=float(demo_acc.get("balance", 100.0)),
                     )
                     self.state = DerivConnectionState.AUTHORIZED
                     logger.info("✅ Autenticado com sucesso via PAT na nova Options API: %s", self._auth_info.loginid)
@@ -366,7 +381,7 @@ class DerivWebSocketClient:
                     is_virtual=True,
                     loginid="VRTC_SIMULATOR",
                     currency="USD",
-                    balance=1000.0,
+                    balance=100.0,
                 )
                 self.state = DerivConnectionState.AUTHORIZED
                 logger.info(
@@ -385,7 +400,7 @@ class DerivWebSocketClient:
                 is_virtual=True,
                 loginid="VRTC_SIMULATOR",
                 currency="USD",
-                balance=1000.0,
+                balance=100.0,
             )
             self.state = DerivConnectionState.AUTHORIZED
             return self._auth_info
@@ -400,7 +415,7 @@ class DerivWebSocketClient:
                     is_virtual=True,
                     loginid="VRTC_SIMULATOR",
                     currency="USD",
-                    balance=1000.0,
+                    balance=100.0,
                 )
                 self.state = DerivConnectionState.AUTHORIZED
                 return self._auth_info
@@ -529,6 +544,20 @@ class DerivWebSocketClient:
             return self._auth_info.balance
         return 0.0
 
+    def set_balance(self, new_balance: float) -> float:
+        """Define ou reseta manualmente o saldo DEMO gerenciado."""
+        bal = round(float(new_balance), 2)
+        if self._auth_info:
+            self._auth_info.balance = bal
+        else:
+            self._auth_info = DerivAuthorizeResponse(
+                is_virtual=True,
+                loginid="VRTC_SIMULATOR",
+                currency="USD",
+                balance=bal,
+            )
+        return bal
+
     async def get_open_contract(self, contract_id: int | str) -> dict:
         """Consulta o status atual ou final de um contrato em andamento."""
         cid = int(contract_id) if str(contract_id).isdigit() else contract_id
@@ -550,12 +579,67 @@ class DerivWebSocketClient:
                 self._handle_message(raw_msg)
         except asyncio.CancelledError:
             pass
-        except websockets.exceptions.ConnectionClosed:
-            logger.info("Conexão WebSocket com Deriv encerrada normalmente.")
+        except websockets.exceptions.ConnectionClosed as cc:
+            logger.warning("Conexão WebSocket com Deriv interrompida: %s. Acionando reconexão...", cc)
             self.state = DerivConnectionState.DISCONNECTED
         except Exception as exc:
-            logger.error("Erro no loop de escuta Deriv: %s", exc)
+            logger.error("Erro no loop de escuta Deriv: %s. Acionando reconexão...", exc)
             self.state = DerivConnectionState.ERROR
+        finally:
+            if self._should_reconnect and not self._is_reconnecting:
+                if self._reconnect_task and not self._reconnect_task.done():
+                    self._reconnect_task.cancel()
+                self._reconnect_task = asyncio.create_task(self._trigger_reconnect())
+
+    async def _heartbeat_loop(self) -> None:
+        """Envia ping em nível de aplicação a cada 20s para manter a conexão WebSocket viva."""
+        try:
+            while self._should_reconnect:
+                await asyncio.sleep(20.0)
+                if self._ws and self.is_connected:
+                    try:
+                        await self.send_raw_request({"ping": 1})
+                        logger.debug("Heartbeat ping enviado à Deriv.")
+                    except Exception as ping_err:
+                        logger.warning("Falha ao enviar heartbeat ping: %s", ping_err)
+                        break
+        except asyncio.CancelledError:
+            pass
+
+    async def _trigger_reconnect(self) -> None:
+        """Reconecta automaticamente com backoff exponencial, re-autentica e re-inscreve símbolos."""
+        if not self._should_reconnect or self._is_reconnecting:
+            return
+
+        self._is_reconnecting = True
+        logger.info("Iniciando rotina de reconexão automática com a Deriv...")
+        self.state = DerivConnectionState.CONNECTING
+
+        if self._heartbeat_task and not self._heartbeat_task.done():
+            self._heartbeat_task.cancel()
+
+        delay = 1.5
+        max_delay = 20.0
+        while self._should_reconnect:
+            try:
+                await self.connect()
+                if self.demo_token:
+                    await self.authorize(self.demo_token)
+                for sym in list(self._active_symbols):
+                    try:
+                        await self.send_raw_request({"ticks": sym, "subscribe": 1})
+                        logger.info("Re-subscrição de ticks para %s confirmada na reconexão.", sym)
+                    except Exception as sub_err:
+                        logger.warning("Falha ao re-subscrever %s: %s", sym, sub_err)
+
+                logger.info("✅ Conexão com Deriv RESTABELECIDA E FIRMADA COM SUCESSO!")
+                break
+            except Exception as rec_err:
+                logger.warning("Tentativa de reconexão falhou (%s). Nova tentativa em %.1fs...", rec_err, delay)
+                await asyncio.sleep(delay)
+                delay = min(delay * 1.5, max_delay)
+
+        self._is_reconnecting = False
 
     def _handle_message(self, raw_msg: str) -> None:
         """Processa e despacha mensagens recebidas do WebSocket."""
