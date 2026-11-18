@@ -11,6 +11,7 @@ from backend.app.modules.strategy_lab.registry import StrategyRegistry
 from backend.app.modules.tick_collector.collector import TickCollector
 from backend.app.modules.contract_executor.executor import ContractExecutor
 from backend.app.modules.audit_logger.ledger import AuditLedger
+from backend.app.modules.auto_trader.engine import AutoTraderEngine
 
 _risk_manager_instance: RiskManager | None = None
 _deriv_client_instance: DerivWebSocketClient | None = None
@@ -21,6 +22,7 @@ _ai_trainer_instance: AIAgentTrainer | None = None
 _model_ensemble_instance: ModelEnsemble | None = None
 _contract_executor_instance: ContractExecutor | None = None
 _audit_ledger_instance: AuditLedger | None = None
+_auto_trader_instance: AutoTraderEngine | None = None
 
 
 def get_risk_manager() -> RiskManager:
@@ -127,3 +129,25 @@ def get_contract_executor() -> ContractExecutor:
             audit_callback=ledger.record_execution_result,
         )
     return _contract_executor_instance
+
+
+def get_auto_trader() -> AutoTraderEngine:
+    """Retorna a instância singleton do AutoTraderEngine."""
+    global _auto_trader_instance
+    if _auto_trader_instance is None:
+        client = get_deriv_client()
+        collector = get_tick_collector()
+        evaluator = get_statistical_evaluator()
+        ensemble = get_model_ensemble()
+        ensemble_strat = EnsembleStrategy(ensemble=ensemble)
+        executor = get_contract_executor()
+        risk_mgr = get_risk_manager()
+        _auto_trader_instance = AutoTraderEngine(
+            deriv_client=client,
+            tick_collector=collector,
+            evaluator=evaluator,
+            ensemble_strategy=ensemble_strat,
+            contract_executor=executor,
+            risk_manager=risk_mgr,
+        )
+    return _auto_trader_instance

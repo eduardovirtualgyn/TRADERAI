@@ -1,6 +1,8 @@
 import {
   AuditMetrics,
   AuditRecord,
+  AutoTraderConfig,
+  AutoTraderStatus,
   DerivStatus,
   EnsemblePrediction,
   ExecutionResult,
@@ -142,4 +144,17 @@ export const api = {
     ),
   exportCsvUrl: () => `${API_BASE}/audit/export/csv`,
   exportJsonUrl: () => `${API_BASE}/audit/export/json`,
+
+  // Auto-Trader
+  getAutoTraderStatus: () => fetchJson<AutoTraderStatus>("/auto-trader/status"),
+  toggleAutoTrader: (enabled: boolean) =>
+    fetchJson<AutoTraderStatus>("/auto-trader/toggle", {
+      method: "POST",
+      body: JSON.stringify({ enabled }),
+    }),
+  configureAutoTrader: (config: Partial<AutoTraderConfig>) =>
+    fetchJson<AutoTraderStatus>("/auto-trader/configure", {
+      method: "POST",
+      body: JSON.stringify(config),
+    }),
 };

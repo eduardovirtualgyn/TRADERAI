@@ -40,6 +40,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if settings.deriv_demo_token and settings.deriv_demo_token != "seu_token_demo_aqui":
         import asyncio
         from backend.app.api.deps import (
+            get_auto_trader,
             get_deriv_client,
             get_risk_manager,
             get_tick_collector,
@@ -50,6 +51,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             base_delay = 2.0
             client = get_deriv_client()
             _ = get_tick_collector()  # Realiza o bind de callbacks
+            _ = get_auto_trader()  # Inicializa o motor autônomo com callback de ticks
 
             for attempt in range(1, max_attempts + 1):
                 try:

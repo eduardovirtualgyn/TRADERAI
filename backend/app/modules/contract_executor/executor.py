@@ -220,6 +220,11 @@ class ContractExecutor:
 
         # 1. Atualiza métricas e limites de risco
         self.risk_manager.record_trade_result(won=won, pnl_usd=pnl, stake_used=stake)
+        if hasattr(self.deriv_client, "update_balance"):
+            try:
+                self.deriv_client.update_balance(pnl)
+            except Exception as bal_err:
+                logger.warning("Falha ao atualizar saldo no cliente Deriv: %s", bal_err)
 
         settled_result = ExecutionResult(
             success=True,

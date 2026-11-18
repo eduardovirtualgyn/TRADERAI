@@ -142,3 +142,28 @@ export interface AuditRecord {
   prev_hash: string;
   record_hash: string;
 }
+
+export interface AutoTraderConfig {
+  enabled: boolean;
+  symbol: string;
+  stake: number;
+  min_probability: number;
+  min_wilson_lower_bound: number;
+  cooldown_seconds: number;
+}
+
+export interface AutoTraderStatus {
+  enabled: boolean;
+  state: "STOPPED" | "SEARCHING_EDGE" | "EXECUTING" | "COOLDOWN" | "PAUSED_BY_RISK";
+  symbol: string;
+  stake: number;
+  min_probability: number;
+  cooldown_seconds: number;
+  last_decision: string;
+  last_action_timestamp: number | null;
+  total_trades: number;
+  won_trades: number;
+  lost_trades: number;
+  session_pnl: number;
+  active_contract_id: string | null;
+}

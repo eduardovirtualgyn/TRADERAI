@@ -11,6 +11,7 @@ import { api } from "@/services/api";
 import {
   AuditMetrics,
   AuditRecord,
+  AutoTraderStatus,
   DerivStatus,
   EnsemblePrediction,
   RiskStatus,
@@ -25,18 +26,20 @@ export default function DashboardPage() {
   const [ensemble, setEnsemble] = useState<EnsemblePrediction | null>(null);
   const [auditRecords, setAuditRecords] = useState<AuditRecord[]>([]);
   const [auditMetrics, setAuditMetrics] = useState<AuditMetrics | null>(null);
+  const [autoTraderStatus, setAutoTraderStatus] = useState<AutoTraderStatus | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Polling em tempo real a cada 2 segundos
   const refreshAll = async () => {
     try {
-      const [derivRes, riskRes, tickRes, ensembleRes, auditRes, metricsRes] = await Promise.allSettled([
+      const [derivRes, riskRes, tickRes, ensembleRes, auditRes, metricsRes, autoTraderRes] = await Promise.allSettled([
         api.getDerivStatus(),
         api.getRiskStatus(),
         api.getTickSummary(selectedSymbol),
         api.getEnsembleStatus(selectedSymbol),
         api.getAuditLogs(50),
         api.getAuditMetrics(),
+        api.getAutoTraderStatus(),
       ]);
 
       if (derivRes.status === "fulfilled") setDerivStatus(derivRes.value);
@@ -45,6 +48,7 @@ export default function DashboardPage() {
       if (ensembleRes.status === "fulfilled") setEnsemble(ensembleRes.value);
       if (auditRes.status === "fulfilled") setAuditRecords(auditRes.value);
       if (metricsRes.status === "fulfilled") setAuditMetrics(metricsRes.value);
+      if (autoTraderRes.status === "fulfilled") setAutoTraderStatus(autoTraderRes.value);
     } catch (err) {
       console.error("Erro no polling do dashboard:", err);
     }
@@ -116,6 +120,7 @@ export default function DashboardPage() {
           selectedSymbol={selectedSymbol}
           ensemble={ensemble}
           riskStatus={riskStatus}
+          autoTrader={autoTraderStatus}
           onTradeExecuted={refreshAll}
         />
 

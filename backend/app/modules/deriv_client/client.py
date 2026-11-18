@@ -4,6 +4,7 @@ Implementa salvaguardas de conta DEMO, extração precisa de dígitos e heartbea
 """
 
 import asyncio
+import inspect
 import json
 import re
 import socket
@@ -521,6 +522,26 @@ class DerivWebSocketClient:
         buy_dict = response.get("buy", {})
         return ContractBuyResult.from_api_payload(buy_dict, price)
 
+    def update_balance(self, pnl: float) -> float:
+        """Atualiza o saldo em memória após liquidação de contrato."""
+        if self._auth_info:
+            self._auth_info.balance = round(max(0.0, self._auth_info.balance + pnl), 2)
+            return self._auth_info.balance
+        return 0.0
+
+    async def get_open_contract(self, contract_id: int | str) -> dict:
+        """Consulta o status atual ou final de um contrato em andamento."""
+        cid = int(contract_id) if str(contract_id).isdigit() else contract_id
+        payload = {"proposal_open_contract": 1, "contract_id": cid}
+        try:
+            response = await self.send_raw_request(payload)
+            if "error" in response:
+                return {}
+            return response.get("proposal_open_contract", {})
+        except Exception as exc:
+            logger.warning("Falha ao consultar status do contrato %s: %s", contract_id, exc)
+            return {}
+
     async def _listen_loop(self) -> None:
         """Loop de escuta e distribuição de mensagens assíncronas do WebSocket."""
         try:
@@ -563,6 +584,8 @@ class DerivWebSocketClient:
         """Envia o tick estruturado para todos os ouvintes registrados."""
         for callback in self._tick_callbacks:
             try:
-                callback(tick)
+                res = callback(tick)
+                if inspect.iscoroutine(res):
+                    asyncio.create_task(res)
             except Exception as exc:
                 logger.exception("Erro ao executar callback de tick: %s", exc)
