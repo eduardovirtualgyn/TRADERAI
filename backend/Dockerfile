@@ -8,9 +8,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Instala dependências de compilação essenciais
+# Instala dependências de compilação essenciais e certificados SSL CA
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    ca-certificates \
     curl \
     && rm -rf /var/lib/apt/lists/*
 

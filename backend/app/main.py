@@ -51,7 +51,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 client = get_deriv_client()
                 _ = get_tick_collector()  # Realiza o bind de callbacks
                 logger.info("Iniciando auto-conexão WebSocket com a Deriv...")
-                await client.connect()
+                if not client.is_connected:
+                    await client.connect()
                 auth_info = await client.authorize()
                 await client.subscribe_ticks(settings.deriv_default_symbol)
                 risk_mgr = get_risk_manager()

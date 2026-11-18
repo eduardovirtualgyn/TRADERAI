@@ -5,6 +5,7 @@ Implementa salvaguardas de conta DEMO, extração precisa de dígitos e heartbea
 
 import asyncio
 import json
+import ssl
 from typing import Any, Callable, Dict, List, Optional
 import websockets
 from websockets.client import WebSocketClientProtocol
@@ -86,26 +87,83 @@ class DerivWebSocketClient:
         self._req_id += 1
         return self._req_id
 
-    async def connect(self) -> None:
-        """Estabelece a conexão WebSocket com o gateway da Deriv."""
-        self.state = DerivConnectionState.CONNECTING
-        full_url = f"{self.ws_url}?app_id={self.app_id}"
-        logger.info("Conectando ao Deriv WebSocket em %s...", full_url)
+    def _build_url(self, base_url: str) -> str:
+        """Formata a URL do WebSocket garantindo endpoint v3 e parâmetros oficiais."""
+        clean = base_url.strip().strip("'\"").rstrip("/")
+        if "/websockets/v3" not in clean:
+            clean = f"{clean}/websockets/v3"
+        sep = "&" if "?" in clean else "?"
+        params = []
+        if "app_id=" not in clean:
+            params.append(f"app_id={self.app_id}")
+        if "l=" not in clean:
+            params.append("l=EN")
+        if "brand=" not in clean:
+            params.append("brand=deriv")
 
-        try:
-            self._ws = await websockets.connect(
-                full_url,
-                ping_interval=30,
-                ping_timeout=10,
-            )
-            self.state = DerivConnectionState.CONNECTED
-            logger.info("Conexão WebSocket estabelecida com sucesso.")
-            # Inicia o loop leitor em segundo plano
-            self._listener_task = asyncio.create_task(self._listen_loop())
-        except Exception as exc:
-            self.state = DerivConnectionState.ERROR
-            logger.error("Falha ao conectar no WebSocket Deriv: %s", exc)
-            raise DerivApiError(f"Falha de conexão com a Deriv: {exc}") from exc
+        query = "&".join(params)
+        return f"{clean}{sep}{query}" if query else clean
+
+    def _get_candidate_endpoints(self) -> List[str]:
+        """Gera lista ordenada de endpoints WebSocket com failover automático."""
+        endpoints: List[str] = []
+        if self.ws_url:
+            endpoints.append(self._build_url(self.ws_url))
+
+        fallbacks = [
+            "wss://ws.derivws.com/websockets/v3",
+            "wss://frontend.binaryws.com/websockets/v3",
+            "wss://ws.binaryws.com/websockets/v3",
+        ]
+        for fb in fallbacks:
+            candidate = self._build_url(fb)
+            if candidate not in endpoints:
+                endpoints.append(candidate)
+        return endpoints
+
+    async def connect(self) -> None:
+        """Estabelece a conexão WebSocket com o gateway da Deriv usando failover e headers defensivos."""
+        self.state = DerivConnectionState.CONNECTING
+        candidates = self._get_candidate_endpoints()
+        last_error: Optional[Exception] = None
+
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+
+        user_agent = (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/128.0.0.0 Safari/537.36"
+        )
+        origin = "https://app.deriv.com"
+        headers = {
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+
+        for url in candidates:
+            logger.info("Tentando conexão WebSocket com Deriv em %s...", url)
+            try:
+                self._ws = await websockets.connect(
+                    url,
+                    origin=origin,
+                    user_agent_header=user_agent,
+                    additional_headers=headers,
+                    ssl=ssl_ctx,
+                    open_timeout=8.0,
+                    ping_interval=30,
+                    ping_timeout=10,
+                )
+                self.state = DerivConnectionState.CONNECTED
+                logger.info("✅ Conexão WebSocket estabelecida com sucesso via %s.", url)
+                self._listener_task = asyncio.create_task(self._listen_loop())
+                return
+            except Exception as exc:
+                last_error = exc
+                logger.warning("Falha ao conectar via %s: %s. Tentando próximo endpoint...", url, exc)
+
+        self.state = DerivConnectionState.ERROR
+        logger.error("Todos os endpoints WebSocket da Deriv falharam. Último erro: %s", last_error)
+        raise DerivApiError(f"Falha de conexão com a Deriv: {last_error}") from last_error
 
     async def disconnect(self) -> None:
         """Encerra a conexão WebSocket e cancela tarefas de segundo plano."""
