@@ -5,12 +5,21 @@ Implementa salvaguardas de conta DEMO, extração precisa de dígitos e heartbea
 
 import asyncio
 import json
+import re
+import socket
 import ssl
 from typing import Any, Callable, Dict, List, Optional
 import websockets
 from websockets.client import WebSocketClientProtocol
 
-from backend.app.core.errors import DerivApiError, TraderSecurityError
+from backend.app.core.errors import (
+    DerivApiError,
+    DerivAuthError,
+    DerivConfigError,
+    DerivConnectionError,
+    DerivOperationalError,
+    TraderSecurityError,
+)
 from backend.app.core.logging import logger
 from backend.app.modules.deriv_client.models import (
     ContractBuyResult,
@@ -19,6 +28,16 @@ from backend.app.modules.deriv_client.models import (
     ProposalData,
     TickData,
 )
+
+
+def sanitize_token(token: Optional[str]) -> str:
+    """Mascara o token para nunca vazar nos logs ou respostas."""
+    if not token:
+        return "[NENHUM]"
+    clean = token.strip()
+    if len(clean) <= 8:
+        return "****"
+    return f"{clean[:6]}...{clean[-4:]}"
 
 
 def extract_last_digit(quote: float, pip_size: int = 2) -> int:
@@ -121,6 +140,53 @@ class DerivWebSocketClient:
                 endpoints.append(candidate)
         return endpoints
 
+    def _parse_connection_exception(self, exc: Exception) -> DerivConnectionError:
+        """Classifica detalhadamente a falha de conexão de acordo com os padrões da Deriv/Cloudflare."""
+        exc_str = str(exc)
+        status_code = 520
+
+        # Identifica código HTTP retornado pela infraestrutura
+        status_match = re.search(r"HTTP\s*(\d{3})", exc_str, re.IGNORECASE)
+        if status_match:
+            status_code = int(status_match.group(1))
+        elif hasattr(exc, "status_code"):
+            status_code = getattr(exc, "status_code")
+
+        if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+            return DerivConnectionError(
+                message="Tempo limite esgotado ao tentar estabelecer conexão com a Deriv API.",
+                detail="A requisição de handshake excedeu o tempo limite (timeout de conexão).",
+                code="WS_TIMEOUT",
+                http_status=504,
+            )
+        if isinstance(exc, socket.gaierror):
+            return DerivConnectionError(
+                message="Falha de resolução de DNS para o servidor da Deriv.",
+                detail=f"Não foi possível resolver o hostname da Deriv: {exc}",
+                code="WS_DNS_FAILED",
+                http_status=502,
+            )
+        if isinstance(exc, ssl.SSLError):
+            return DerivConnectionError(
+                message="Falha na negociação de segurança TLS/SSL com a Deriv.",
+                detail=f"Erro na camada de criptografia SSL/TLS: {exc}",
+                code="WS_SSL_FAILED",
+                http_status=525,
+            )
+
+        detail_msg = f"Handshake WebSocket rejeitado pelo servidor (HTTP {status_code})."
+        if status_code == 520:
+            detail_msg = (
+                "Handshake WebSocket rejeitado pela infraestrutura de borda Cloudflare/Deriv (HTTP 520)."
+            )
+
+        return DerivConnectionError(
+            message="Não foi possível estabelecer conexão com a Deriv API.",
+            detail=detail_msg,
+            code="WS_CONNECTION_FAILED",
+            http_status=status_code,
+        )
+
     async def connect(self) -> None:
         """Estabelece a conexão WebSocket com o gateway da Deriv usando failover e headers defensivos."""
         self.state = DerivConnectionState.CONNECTING
@@ -162,8 +228,15 @@ class DerivWebSocketClient:
                 logger.warning("Falha ao conectar via %s: %s. Tentando próximo endpoint...", url, exc)
 
         self.state = DerivConnectionState.ERROR
-        logger.error("Todos os endpoints WebSocket da Deriv falharam. Último erro: %s", last_error)
-        raise DerivApiError(f"Falha de conexão com a Deriv: {last_error}") from last_error
+        classified_err = (
+            self._parse_connection_exception(last_error) if last_error else DerivConnectionError()
+        )
+        logger.error(
+            "Todos os endpoints WebSocket da Deriv falharam. Código: %s | Detalhe: %s",
+            classified_err.code,
+            classified_err.detail,
+        )
+        raise classified_err
 
     async def disconnect(self) -> None:
         """Encerra a conexão WebSocket e cancela tarefas de segundo plano."""
@@ -222,15 +295,26 @@ class DerivWebSocketClient:
         """Autentica na API e valida estritamente a salvaguarda de conta DEMO."""
         auth_token = token or self.demo_token
         if not auth_token:
-            raise TraderSecurityError(
-                "Nenhum token fornecido. O token de conta DEMO é obrigatório."
+            raise DerivConfigError(
+                message="Token de autorização ausente.",
+                detail="Nenhum token fornecido. O token de conta DEMO é obrigatório.",
+                code="MISSING_TOKEN",
             )
 
+        logger.info("Enviando solicitação de autorização para token %s...", sanitize_token(auth_token))
         response = await self.send_raw_request({"authorize": auth_token})
 
         if "error" in response:
             err = response["error"]
-            raise DerivApiError(f"Erro de autenticação na Deriv: {err.get('message', err)}")
+            err_code = err.get("code", "AUTH_FAILED")
+            err_msg = err.get("message", "Token de API inválido ou não autorizado.")
+            logger.warning("Autorização rejeitada pela Deriv: [%s] %s", err_code, err_msg)
+            raise DerivAuthError(
+                message="Falha de autenticação na Deriv API.",
+                detail=f"Deriv rejeitou o token: {err_msg} (Código: {err_code})",
+                code=err_code,
+                http_status=401,
+            )
 
         auth_data = response.get("authorize", {})
         self._auth_info = self._validate_auth_payload(auth_data)
@@ -273,7 +357,12 @@ class DerivWebSocketClient:
 
         if "error" in response:
             err = response["error"]
-            raise DerivApiError(f"Erro ao assinar ticks de {symbol}: {err.get('message', err)}")
+            err_msg = err.get("message", str(err))
+            raise DerivOperationalError(
+                message=f"Falha ao assinar ticks de {symbol}.",
+                detail=f"Servidor rejeitou subscrição de ticks: {err_msg}",
+                code="SUBSCRIBE_FAILED",
+            )
 
         if symbol not in self._active_symbols:
             self._active_symbols.append(symbol)

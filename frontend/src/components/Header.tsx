@@ -12,6 +12,15 @@ interface HeaderProps {
   onConnectDeriv?: (token?: string) => Promise<void>;
 }
 
+interface ConnectionErrorInfo {
+  error_type: string;
+  code: string;
+  message: string;
+  detail: string;
+  http_status?: number;
+  stage?: string;
+}
+
 export const Header: React.FC<HeaderProps> = ({
   derivStatus,
   riskStatus,
@@ -23,6 +32,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [showTokenModal, setShowTokenModal] = useState(false);
   const [inputToken, setInputToken] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
+  const [connectionError, setConnectionError] = useState<ConnectionErrorInfo | null>(null);
 
   const isConnected = derivStatus?.is_connected ?? false;
   const isAuthorized = derivStatus?.is_authorized ?? false;
@@ -42,10 +52,22 @@ export const Header: React.FC<HeaderProps> = ({
   const handleConnectClick = async () => {
     if (!onConnectDeriv) return;
     setIsConnecting(true);
+    setConnectionError(null);
     try {
       await onConnectDeriv();
     } catch (err: any) {
-      setShowTokenModal(true);
+      if (err.code === "MISSING_TOKEN") {
+        setShowTokenModal(true);
+      } else {
+        setConnectionError({
+          error_type: err.error_type || "Falha de conectividade",
+          code: err.code || "WS_CONNECTION_FAILED",
+          message: err.message || "Não foi possível estabelecer conexão com a Deriv API.",
+          detail: err.detail || (err.message || String(err)),
+          http_status: err.http_status || 520,
+          stage: err.stage || "CONNECTIVITY / HANDSHAKE",
+        });
+      }
     } finally {
       setIsConnecting(false);
     }
@@ -55,11 +77,19 @@ export const Header: React.FC<HeaderProps> = ({
     e.preventDefault();
     if (!onConnectDeriv || !inputToken.trim()) return;
     setIsConnecting(true);
+    setConnectionError(null);
     try {
       await onConnectDeriv(inputToken.trim());
       setShowTokenModal(false);
     } catch (err: any) {
-      alert("Falha na autenticação: " + (err.message || err));
+      setConnectionError({
+        error_type: err.error_type || "Falha de conectividade",
+        code: err.code || "WS_CONNECTION_FAILED",
+        message: err.message || "Não foi possível estabelecer conexão com a Deriv API.",
+        detail: err.detail || (err.message || String(err)),
+        http_status: err.http_status || 520,
+        stage: err.stage || "CONNECTIVITY / HANDSHAKE",
+      });
     } finally {
       setIsConnecting(false);
     }
@@ -210,6 +240,73 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* Modal de Diagnóstico de Erro Estruturado */}
+      {connectionError && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in">
+          <div className="bg-dark-800 border border-rose-500/50 rounded-xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center gap-2.5 text-rose-400 border-b border-dark-600 pb-3">
+              <AlertOctagon className="w-6 h-6 text-rose-500 flex-shrink-0" />
+              <div>
+                <h3 className="font-bold font-mono text-sm uppercase text-white">
+                  {connectionError.message}
+                </h3>
+                <span className="text-[11px] font-mono text-rose-400 font-semibold">
+                  Tipo: {connectionError.error_type}
+                </span>
+              </div>
+            </div>
+
+            <div className="bg-dark-900 border border-dark-700 rounded-lg p-3 font-mono text-xs space-y-2 text-gray-300">
+              <div className="flex justify-between items-center text-gray-400 border-b border-dark-800 pb-1.5">
+                <span>CÓDIGO DE ERRO:</span>
+                <span className="text-rose-400 font-bold">{connectionError.code}</span>
+              </div>
+              <div className="flex justify-between items-center text-gray-400 border-b border-dark-800 pb-1.5">
+                <span>STATUS HTTP:</span>
+                <span className="text-amber-400 font-bold">{connectionError.http_status || "N/A"}</span>
+              </div>
+              <div className="flex justify-between items-center text-gray-400 border-b border-dark-800 pb-1.5">
+                <span>ETAPA DA FALHA:</span>
+                <span className="text-cyan-400 font-bold">{connectionError.stage || "N/A"}</span>
+              </div>
+              <div className="pt-1">
+                <span className="text-gray-400 block mb-1">DETALHAMENTO:</span>
+                <p className="text-rose-300/90 text-[11px] leading-relaxed bg-dark-950 p-2 rounded border border-dark-700">
+                  {connectionError.detail}
+                </p>
+              </div>
+            </div>
+
+            {connectionError.stage?.includes("HANDSHAKE") || connectionError.error_type?.includes("conectividade") ? (
+              <div className="p-2.5 rounded bg-blue-950/40 border border-blue-500/30 text-[11px] font-mono text-blue-300 flex items-start gap-2">
+                <span className="text-blue-400 font-bold">ℹ️</span>
+                <span>
+                  <strong>Nota técnica:</strong> A autenticação não foi executada porque a conexão com o servidor WebSocket não pôde ser estabelecida na infraestrutura.
+                </span>
+              </div>
+            ) : null}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setConnectionError(null)}
+                className="px-4 py-2 rounded bg-dark-700 hover:bg-dark-600 text-gray-200 text-xs font-mono font-bold transition-all"
+              >
+                Fechar
+              </button>
+              <button
+                onClick={() => {
+                  setConnectionError(null);
+                  setShowTokenModal(true);
+                }}
+                className="px-4 py-2 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-mono font-bold transition-all flex items-center gap-1.5"
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                <span>Configurar Token</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

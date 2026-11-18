@@ -13,6 +13,14 @@ const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ||
   (typeof window !== "undefined" ? "/api/backend" : "http://backend:8000/api/v1");
 
+export interface ApiStructuredError extends Error {
+  error_type?: string;
+  code?: string;
+  detail?: string;
+  http_status?: number;
+  stage?: string;
+}
+
 async function fetchJson<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE}${endpoint}`;
   const response = await fetch(url, {
@@ -25,7 +33,29 @@ async function fetchJson<T>(endpoint: string, options?: RequestInit): Promise<T>
 
   if (!response.ok) {
     const errorBody = await response.text();
-    throw new Error(`Erro na API (${response.status}): ${errorBody}`);
+    let parsed: any = null;
+    try {
+      parsed = JSON.parse(errorBody);
+    } catch {
+      // Body is not JSON
+    }
+
+    if (parsed && parsed.detail && typeof parsed.detail === "object") {
+      const err: ApiStructuredError = new Error(parsed.detail.message || "Erro na API");
+      err.error_type = parsed.detail.error_type;
+      err.code = parsed.detail.code;
+      err.detail = parsed.detail.detail;
+      err.http_status = parsed.detail.http_status || response.status;
+      err.stage = parsed.detail.stage;
+      throw err;
+    }
+
+    const fallbackErr: ApiStructuredError = new Error(
+      parsed?.detail || `Erro na API (${response.status}): ${errorBody}`
+    );
+    fallbackErr.http_status = response.status;
+    fallbackErr.code = "API_ERROR";
+    throw fallbackErr;
   }
 
   return response.json();

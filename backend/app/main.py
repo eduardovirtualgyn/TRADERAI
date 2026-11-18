@@ -46,25 +46,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
 
         async def auto_connect_deriv():
-            try:
-                await asyncio.sleep(0.5)
-                client = get_deriv_client()
-                _ = get_tick_collector()  # Realiza o bind de callbacks
-                logger.info("Iniciando auto-conexão WebSocket com a Deriv...")
-                if not client.is_connected:
-                    await client.connect()
-                auth_info = await client.authorize()
-                await client.subscribe_ticks(settings.deriv_default_symbol)
-                risk_mgr = get_risk_manager()
-                if auth_info.balance > 0:
-                    risk_mgr.balance_usd = auth_info.balance
-                logger.info(
-                    "✅ Deriv WebSocket conectado e autenticado com sucesso em DEMO (%s)! Saldo: US$ %.2f",
-                    auth_info.loginid,
-                    auth_info.balance,
-                )
-            except Exception as exc:
-                logger.warning("Auto-conexão Deriv em segundo plano adiada: %s", exc)
+            max_attempts = 3
+            base_delay = 2.0
+            client = get_deriv_client()
+            _ = get_tick_collector()  # Realiza o bind de callbacks
+
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    await asyncio.sleep(0.5 if attempt == 1 else base_delay * (2 ** (attempt - 2)))
+                    logger.info("Tentativa %d/%d de auto-conexão WebSocket com a Deriv...", attempt, max_attempts)
+                    if not client.is_connected:
+                        await client.connect()
+                    auth_info = await client.authorize()
+                    await client.subscribe_ticks(settings.deriv_default_symbol)
+                    risk_mgr = get_risk_manager()
+                    if auth_info.balance > 0:
+                        risk_mgr.balance_usd = auth_info.balance
+                    logger.info(
+                        "✅ Deriv WebSocket conectado e autenticado com sucesso em DEMO (%s)! Saldo: US$ %.2f",
+                        auth_info.loginid,
+                        auth_info.balance,
+                    )
+                    return
+                except Exception as exc:
+                    logger.warning("Falha na tentativa %d/%d de auto-conexão: %s", attempt, max_attempts, exc)
+
+            logger.info("Auto-conexão em segundo plano pausada após %d tentativas. Painel pronto para conexão manual.", max_attempts)
 
         connect_task = asyncio.create_task(auto_connect_deriv())
 
