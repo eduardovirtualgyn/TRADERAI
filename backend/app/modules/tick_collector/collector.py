@@ -97,7 +97,42 @@ class TickCollector:
 
         latest_tick = self.buffer.get_latest()
 
+        # Frequência de dígitos nos últimos 100 ticks (ou todos disponíveis)
+        digit_frequencies = {str(d): 0 for d in range(10)}
+        sample_ticks = all_ticks[-100:] if len(all_ticks) >= 100 else all_ticks
+        for t in sample_ticks:
+            key = str(t.last_digit)
+            digit_frequencies[key] = digit_frequencies.get(key, 0) + 1
+
+        dist_100 = window_stats.get("100", {
+            "samples": len(sample_ticks),
+            "even_ratio": 0.5,
+            "odd_ratio": 0.5,
+            "even_count": sum(1 for t in sample_ticks if t.is_even),
+            "odd_count": sum(1 for t in sample_ticks if not t.is_even),
+        })
+
+        last_ticks_data = [
+            {
+                "quote": t.quote,
+                "last_digit": t.last_digit,
+                "is_even": t.is_even,
+                "epoch": t.epoch,
+            }
+            for t in all_ticks[-20:]
+        ]
+
         return {
+            # Compatibilidade com Next.js Frontend
+            "buffer_count": len(self.buffer),
+            "capacity": self.buffer.capacity,
+            "current_streak_parity": streak.direction,
+            "current_streak_length": streak.length,
+            "last_ticks": last_ticks_data,
+            "distribution_100": dist_100,
+            "digit_frequencies": digit_frequencies,
+
+            # Campos existentes do backend para integridade
             "buffer_size": len(self.buffer),
             "buffer_capacity": self.buffer.capacity,
             "total_ingested": self.buffer.total_ingested,

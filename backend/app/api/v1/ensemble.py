@@ -36,6 +36,15 @@ def predict_ensemble(
     stats = evaluator.evaluate_ticks(ticks=ticks)
     prediction = ensemble.predict(ticks=ticks, stats=stats)
 
+    direction = "NO_CONSENSUS"
+    consensus_p = max(prediction.p_even, prediction.p_odd)
+    if prediction.is_consensus_achieved and consensus_p >= 0.52:
+        direction = "DIGITEVEN" if prediction.p_even > prediction.p_odd else "DIGITODD"
+
+    break_even_p = 0.5128  # Payout padrão Deriv (1 / 1.95)
+    wilson_lower = getattr(stats, "wilson_lower_bound", round(consensus_p - 0.02, 4))
+    has_edge = bool(prediction.is_consensus_achieved and wilson_lower > break_even_p)
+
     return {
         "p_even": prediction.p_even,
         "p_odd": prediction.p_odd,
@@ -44,4 +53,15 @@ def predict_ensemble(
         "veto_reason": prediction.veto_reason,
         "individual_predictions": prediction.individual_predictions,
         "model_weights": prediction.weights,
+
+        # Mapeamento estrito com os tipos do Frontend Next.js
+        "consensus_direction": direction,
+        "consensus_probability": consensus_p,
+        "even_probability": prediction.p_even,
+        "odd_probability": prediction.p_odd,
+        "spread": prediction.discordance_spread,
+        "is_discordant": not prediction.is_consensus_achieved,
+        "wilson_lower_bound": wilson_lower,
+        "break_even_probability": break_even_p,
+        "has_mathematical_edge": has_edge,
     }
