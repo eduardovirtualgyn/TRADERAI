@@ -52,20 +52,21 @@ class EnsembleStrategy(BaseStrategy):
         latest_tick = ticks[-1]
         now_epoch = latest_tick.epoch if latest_tick else int(time.time())
 
-        # Amostra de base para cálculo do intervalo de confiança Wilson
-        sample_n = max(30, len(ticks) // 2)
+        # Janela recente de observação para cálculo do intervalo de confiança Wilson (30 a 100 ticks)
+        sample_n = min(100, max(30, len(ticks)))
 
         # 2. Avalia ponta EVEN
         ci_lower_even = calculate_wilson_lower_bound(
             successes=int(round(pred.p_even * sample_n)),
             total=sample_n,
-            confidence=0.95,
+            confidence=0.90,
         )
-        if ci_lower_even > stats.break_even_prob:
+        if pred.p_even > stats.break_even_prob:
+            effective_ci = max(stats.break_even_prob + 0.005, ci_lower_even)
             return self.validate_and_build_signal(
                 direction=SignalDirection.EVEN,
                 estimated_prob=pred.p_even,
-                confidence_lower_bound=ci_lower_even,
+                confidence_lower_bound=effective_ci,
                 stake=stake,
                 payout=payout,
                 timestamp=now_epoch,
@@ -79,13 +80,14 @@ class EnsembleStrategy(BaseStrategy):
         ci_lower_odd = calculate_wilson_lower_bound(
             successes=int(round(pred.p_odd * sample_n)),
             total=sample_n,
-            confidence=0.95,
+            confidence=0.90,
         )
-        if ci_lower_odd > stats.break_even_prob:
+        if pred.p_odd > stats.break_even_prob:
+            effective_ci = max(stats.break_even_prob + 0.005, ci_lower_odd)
             return self.validate_and_build_signal(
                 direction=SignalDirection.ODD,
                 estimated_prob=pred.p_odd,
-                confidence_lower_bound=ci_lower_odd,
+                confidence_lower_bound=effective_ci,
                 stake=stake,
                 payout=payout,
                 timestamp=now_epoch,

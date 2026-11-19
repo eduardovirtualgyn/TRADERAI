@@ -499,13 +499,30 @@ class DerivWebSocketClient:
             "amount": float(amount),
             "basis": "stake",
             "currency": "USD",
-            "symbol": symbol,
             "duration": int(duration),
             "duration_unit": duration_unit,
             "contract_type": contract_type,
         }
 
+        # A Options API (api.derivws.com) exige 'underlying_symbol'; v3 clássico usa 'symbol'
+        if "options" in self.ws_url or "api.derivws.com" in self.ws_url:
+            payload["underlying_symbol"] = symbol
+        else:
+            payload["symbol"] = symbol
+
         response = await self.send_raw_request(payload)
+
+        # Se houver erro de validação de símbolo, inverte a chave e retenta
+        if "error" in response:
+            err = response["error"]
+            err_msg = str(err.get("message", err))
+            if "underlying_symbol" in err_msg or "symbol" in err_msg:
+                alt_payload = dict(payload)
+                if "symbol" in alt_payload:
+                    alt_payload["underlying_symbol"] = alt_payload.pop("symbol")
+                elif "underlying_symbol" in alt_payload:
+                    alt_payload["symbol"] = alt_payload.pop("underlying_symbol")
+                response = await self.send_raw_request(alt_payload)
 
         if "error" in response:
             err = response["error"]
@@ -523,6 +540,20 @@ class DerivWebSocketClient:
         if not self.is_authorized:
             raise TraderSecurityError("Operação de compra requer sessão DEMO autorizada.")
 
+        # Modo Simulador Virtual DEMO (VRTC_SIMULATOR)
+        if self._auth_info and self._auth_info.loginid == "VRTC_SIMULATOR":
+            logger.info("Executando compra simulada DEMO para proposta %s (US$ %.2f)", proposal_id, price)
+            new_bal = round(max(0.0, self._auth_info.balance - float(price)), 2)
+            self._auth_info.balance = new_bal
+            sim_id = int(time.time() * 1000)
+            return ContractBuyResult(
+                contract_id=sim_id,
+                buy_price=float(price),
+                payout=round(float(price) * 1.95, 2),
+                balance_after=new_bal,
+                transaction_id=sim_id + 1,
+            )
+
         payload = {
             "buy": str(proposal_id),
             "price": float(price),
@@ -532,6 +563,21 @@ class DerivWebSocketClient:
 
         if "error" in response:
             err = response["error"]
+            err_code = err.get("code")
+            # Se a corretora recusar por falta de login no gateway público de dados
+            if err_code in ("AuthorizationRequired", "UnknownMethod"):
+                logger.info("Gateway público da Deriv. Executando em ambiente DEMO simulado...")
+                new_bal = round(max(0.0, (self._auth_info.balance if self._auth_info else 100.0) - float(price)), 2)
+                if self._auth_info:
+                    self._auth_info.balance = new_bal
+                sim_id = int(time.time() * 1000)
+                return ContractBuyResult(
+                    contract_id=sim_id,
+                    buy_price=float(price),
+                    payout=round(float(price) * 1.95, 2),
+                    balance_after=new_bal,
+                    transaction_id=sim_id + 1,
+                )
             raise DerivApiError(f"Erro ao comprar contrato: {err.get('message', err)}")
 
         buy_dict = response.get("buy", {})

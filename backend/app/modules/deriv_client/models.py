@@ -34,9 +34,9 @@ class TickData:
     symbol: str
     epoch: int
     quote: float
-    pip_size: int
     last_digit: int
     is_even: bool
+    pip_size: int = 2
 
     @classmethod
     def from_api_payload(cls, tick_dict: dict) -> "TickData":
@@ -55,9 +55,9 @@ class TickData:
             symbol=symbol,
             epoch=epoch,
             quote=quote,
-            pip_size=pip_size,
             last_digit=last_digit,
             is_even=is_even,
+            pip_size=pip_size,
         )
 
 

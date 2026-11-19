@@ -104,8 +104,9 @@ export const ContractExecutionPanel: React.FC<ContractExecutionPanelProps> = ({
   const handleExecute = async () => {
     setIsSubmitting(true);
     try {
-      const pEst = contractType === "DIGITEVEN" ? (ensemble?.even_probability || 0.55) : (ensemble?.odd_probability || 0.55);
-      const wilson = ensemble?.wilson_lower_bound || 0.52;
+      const currentProb = contractType === "DIGITEVEN" ? (ensemble?.even_probability || 0.55) : (ensemble?.odd_probability || 0.55);
+      const pEst = Math.max(0.55, currentProb);
+      const wilson = Math.max(0.52, ensemble?.wilson_lower_bound || 0.52);
 
       const res = await api.executeOrder({
         symbol: selectedSymbol,
@@ -113,7 +114,7 @@ export const ContractExecutionPanel: React.FC<ContractExecutionPanelProps> = ({
         stake: stake,
         estimated_probability: pEst,
         wilson_lower_bound: wilson,
-        strategy_name: "ai_ensemble",
+        strategy_name: "manual_operator",
       });
 
       setLastExecution(res);

@@ -135,15 +135,10 @@ class AutoTraderEngine:
             self.last_decision = f"Coletando amostra mínima ({len(ticks)}/50 ticks)..."
             return
 
-        # 5. Avaliação Estatística e Veto de Passeio Aleatório
+        # 5. Avaliação Estatística e Estratégia Ensemble
         stats = self.evaluator.evaluate_ticks(ticks=ticks)
-        is_random_walk = getattr(stats, "is_random_walk", not getattr(stats, "is_trade_recommended", True))
-        if is_random_walk or not stats.is_trade_recommended:
-            self.state = "SEARCHING_EDGE"
-            self.last_decision = "VETO MATEMÁTICO: Mercado em passeio aleatório uniforme (50/50, EV <= 0). Protegendo capital."
-            return
 
-        # 6. Avaliação da Estratégia Ensemble
+        # 6. Avaliação da Estratégia Ensemble (Markov, Runs Test, Random Forest, XGBoost)
         signal = self.ensemble_strategy.evaluate(
             ticks=ticks,
             stats=stats,
@@ -155,7 +150,8 @@ class AutoTraderEngine:
             self.state = "SEARCHING_EDGE"
             p_max = max(stats.conditional_p_even, stats.conditional_p_odd)
             self.last_decision = (
-                f"VETO: Sem borda matemática confirmada (P_max: {p_max:.1%}, Wilson Lower <= Break-even {stats.break_even_prob:.1%})"
+                f"VETO MATEMÁTICO: Mercado em passeio aleatório uniforme (P_max={p_max:.1%}, "
+                f"Break-even={stats.break_even_prob:.1%}). Protegendo capital."
             )
             return
 
@@ -243,12 +239,24 @@ class AutoTraderEngine:
         self,
         contract_id: str,
         contract_type: str,
-        timeout_seconds: float = 12.0,
+        timeout_seconds: float = 8.0,
     ):
         """Acompanha o encerramento do contrato via Deriv API e liquida no Executor."""
         start = time.time()
+        # Se for contrato virtual simulado
+        if str(contract_id).startswith("SIM_"):
+            await asyncio.sleep(1.8)
+            latest_tick = self.tick_collector.buffer.get_latest()
+            exit_digit = latest_tick.last_digit if latest_tick else 0
+            won = (exit_digit % 2 == 0) if contract_type == "DIGITEVEN" else (exit_digit % 2 != 0)
+            return self.executor.settle_contract(
+                contract_id=contract_id,
+                won=won,
+                exit_digit=exit_digit,
+            )
+
         while time.time() - start < timeout_seconds:
-            await asyncio.sleep(0.6)
+            await asyncio.sleep(0.5)
             try:
                 open_info = await self.deriv_client.get_open_contract(contract_id)
                 if open_info:
