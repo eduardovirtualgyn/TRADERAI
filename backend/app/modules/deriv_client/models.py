@@ -109,8 +109,8 @@ class ContractBuyResult:
     buy_price: float
     payout: float
     balance_after: float
-    shortcode: str
-    start_time: int
+    shortcode: str = ""
+    start_time: int = 0
 
     @classmethod
     def from_api_payload(cls, buy_dict: dict, price: float) -> "ContractBuyResult":

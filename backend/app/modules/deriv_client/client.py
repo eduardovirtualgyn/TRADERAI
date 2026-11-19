@@ -9,6 +9,7 @@ import json
 import re
 import socket
 import ssl
+import time
 from typing import Any, Callable, Dict, List, Optional
 import websockets
 from websockets.client import WebSocketClientProtocol
@@ -545,13 +546,15 @@ class DerivWebSocketClient:
             logger.info("Executando compra simulada DEMO para proposta %s (US$ %.2f)", proposal_id, price)
             new_bal = round(max(0.0, self._auth_info.balance - float(price)), 2)
             self._auth_info.balance = new_bal
-            sim_id = int(time.time() * 1000)
+            sim_id = str(int(time.time() * 1000))
             return ContractBuyResult(
                 contract_id=sim_id,
+                transaction_id=str(int(sim_id) + 1),
                 buy_price=float(price),
                 payout=round(float(price) * 1.95, 2),
                 balance_after=new_bal,
-                transaction_id=sim_id + 1,
+                shortcode=f"SIM_{proposal_id[:8]}",
+                start_time=int(time.time()),
             )
 
         payload = {
@@ -570,13 +573,15 @@ class DerivWebSocketClient:
                 new_bal = round(max(0.0, (self._auth_info.balance if self._auth_info else 100.0) - float(price)), 2)
                 if self._auth_info:
                     self._auth_info.balance = new_bal
-                sim_id = int(time.time() * 1000)
+                sim_id = str(int(time.time() * 1000))
                 return ContractBuyResult(
                     contract_id=sim_id,
+                    transaction_id=str(int(sim_id) + 1),
                     buy_price=float(price),
                     payout=round(float(price) * 1.95, 2),
                     balance_after=new_bal,
-                    transaction_id=sim_id + 1,
+                    shortcode=f"SIM_{proposal_id[:8]}",
+                    start_time=int(time.time()),
                 )
             raise DerivApiError(f"Erro ao comprar contrato: {err.get('message', err)}")
 
