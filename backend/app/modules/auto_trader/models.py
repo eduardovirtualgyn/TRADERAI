@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 class AutoTraderConfig(BaseModel):
     """Configurações operacionais do robô autônomo."""
 
-    enabled: bool = Field(default=False, description="Liga ou desliga o Auto-Trader")
+    enabled: bool = Field(default=True, description="Liga ou desliga o Auto-Trader")
     symbol: str = Field(default="R_100", description="Índice sintético operado")
     stake: float = Field(default=1.0, ge=0.35, le=5.0, description="Stake por operação em USD")
     min_probability: float = Field(default=0.52, ge=0.50, le=0.90, description="Probabilidade mínima calculada")

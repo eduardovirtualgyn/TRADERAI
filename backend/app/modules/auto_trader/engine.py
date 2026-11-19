@@ -37,9 +37,13 @@ class AutoTraderEngine:
         self.executor = contract_executor
         self.risk_manager = risk_manager
 
-        self.config = config or AutoTraderConfig()
-        self.state = "STOPPED"
-        self.last_decision = "Robô autônomo aguardando ativação."
+        self.config = config or AutoTraderConfig(enabled=True)
+        if self.config.enabled:
+            self.state = "SEARCHING_EDGE"
+            self.last_decision = "Radar autônomo ativo. Monitorando ticks e calculando anomalias estatísticas..."
+        else:
+            self.state = "STOPPED"
+            self.last_decision = "Robô autônomo pausado pelo operador."
         self.last_action_timestamp: Optional[float] = None
         self.active_contract_id: Optional[str] = None
         self.is_executing_trade: bool = False
