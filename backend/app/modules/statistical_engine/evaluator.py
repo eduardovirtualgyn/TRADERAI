@@ -44,6 +44,11 @@ class StatisticalAssessment:
     is_trade_recommended: bool
     rationale: str
 
+    @property
+    def is_random_walk(self) -> bool:
+        """Indica se a série temporal é condizente com passeio aleatório uniforme (sem edge)."""
+        return not self.is_trade_recommended
+
 
 class StatisticalEvaluator:
     """Motor central para inferência estatística e avaliação de edge de mercado."""

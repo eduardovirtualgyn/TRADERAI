@@ -137,7 +137,8 @@ class AutoTraderEngine:
 
         # 5. Avaliação Estatística e Veto de Passeio Aleatório
         stats = self.evaluator.evaluate_ticks(ticks=ticks)
-        if stats.is_random_walk:
+        is_random_walk = getattr(stats, "is_random_walk", not getattr(stats, "is_trade_recommended", True))
+        if is_random_walk or not stats.is_trade_recommended:
             self.state = "SEARCHING_EDGE"
             self.last_decision = "VETO MATEMÁTICO: Mercado em passeio aleatório uniforme (50/50, EV <= 0). Protegendo capital."
             return
