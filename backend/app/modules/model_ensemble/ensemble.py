@@ -62,15 +62,38 @@ class ModelEnsemble:
             # Se Z > 0 (alternância excessiva), probabilidade de alternar em relação ao último tick
             last_is_even = ticks[-1].is_even if ticks else True
             if stats.runs_test.z_score > 0:
-                runs_p_even = 0.35 if last_is_even else 0.65
+                runs_p_even = 0.40 if last_is_even else 0.60
             else:
-                runs_p_even = 0.65 if last_is_even else 0.35
+                runs_p_even = 0.60 if last_is_even else 0.40
 
         predictions_even["runs_test"] = runs_p_even
         runs_brier = max(0.10, 0.25 - (abs(stats.runs_test.z_score) * 0.02))
         brier_scores["runs_test"] = runs_brier
 
-        # 3. Estimadores de Machine Learning (se treinados e calibrados)
+        # 3. Estimador de Assimetria e Frequência Recente (Janela de 25 ticks)
+        if len(ticks) >= 15:
+            recent_slice = ticks[-25:]
+            recent_even_ratio = sum(1 for t in recent_slice if t.is_even) / float(len(recent_slice))
+            predictions_even["recent_window"] = recent_even_ratio
+            brier_scores["recent_window"] = max(0.08, 0.25 - abs(recent_even_ratio - 0.50))
+
+        # 4. Estimador de Streaks de Paridade (Reversão à Média após sequência)
+        if ticks:
+            last_even = ticks[-1].is_even
+            curr_streak = 0
+            for t in reversed(ticks):
+                if t.is_even == last_even:
+                    curr_streak += 1
+                else:
+                    break
+            if curr_streak >= 2:
+                # Com streak >= 2, há forte pressão estatística de reversão à média
+                p_revert = min(0.64, 0.50 + (curr_streak * 0.04))
+                streak_p_even = (1.0 - p_revert) if last_even else p_revert
+                predictions_even["streak_reversion"] = streak_p_even
+                brier_scores["streak_reversion"] = max(0.06, 0.25 - (curr_streak * 0.03))
+
+        # 5. Estimadores de Machine Learning (se treinados e calibrados)
         if self.ai_models and len(ticks) >= 15:
             try:
                 x_vec = extract_features_single(ticks)

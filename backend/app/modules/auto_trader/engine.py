@@ -148,7 +148,8 @@ class AutoTraderEngine:
 
         if not signal:
             self.state = "SEARCHING_EDGE"
-            p_max = max(stats.conditional_p_even, stats.conditional_p_odd)
+            pred = self.ensemble_strategy.ensemble.predict(ticks=ticks, stats=stats)
+            p_max = max(pred.p_even, pred.p_odd)
             self.last_decision = (
                 f"VETO MATEMÁTICO: Mercado em passeio aleatório uniforme (P_max={p_max:.1%}, "
                 f"Break-even={stats.break_even_prob:.1%}). Protegendo capital."

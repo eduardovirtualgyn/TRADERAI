@@ -15,7 +15,7 @@ class DerivConnectionState(str, Enum):
     ERROR = "ERROR"
 
 
-@dataclass(frozen=True)
+@dataclass
 class DerivAuthorizeResponse:
     """Informações retornadas após a chamada de autorização."""
 
