@@ -1,5 +1,7 @@
 """Testes unitários e de integração para o AutoTraderEngine e API."""
 
+import asyncio
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from fastapi.testclient import TestClient
@@ -188,7 +190,7 @@ async def test_auto_trader_executes_and_settles(test_setup):
 
     signal = MagicMock()
     signal.direction.value = "EVEN"
-    signal.estimated_probability = 0.58
+    signal.estimated_prob = 0.58
     signal.confidence_lower_bound = 0.53
 
     # Dispara o ciclo de execução e liquidação
@@ -200,12 +202,18 @@ async def test_auto_trader_executes_and_settles(test_setup):
     assert "VITÓRIA" in engine.last_decision
 
 
-def test_auto_trader_api():
+def test_auto_trader_api(monkeypatch):
+    monkeypatch.setenv("TRADER_API_TOKEN", "test-operator-token")
+    monkeypatch.setenv("APP_ENV", "development")
+    from backend.app.core.config import get_settings
+
+    get_settings.cache_clear()
     app = create_app()
     client = TestClient(app)
+    headers = {"Authorization": "Bearer test-operator-token"}
 
     # 1. Status inicial
-    res = client.get("/api/v1/auto-trader/status")
+    res = client.get("/api/v1/auto-trader/status", headers=headers)
     assert res.status_code == 200
     data = res.json()
     assert "enabled" in data
@@ -213,7 +221,7 @@ def test_auto_trader_api():
     assert "total_trades" in data
 
     # 2. Toggle Ligar
-    res_toggle = client.post("/api/v1/auto-trader/toggle", json={"enabled": True})
+    res_toggle = client.post("/api/v1/auto-trader/toggle", json={"enabled": True}, headers=headers)
     assert res_toggle.status_code == 200
     assert res_toggle.json()["enabled"] is True
 
@@ -228,12 +236,77 @@ def test_auto_trader_api():
             "min_wilson_lower_bound": 0.51,
             "cooldown_seconds": 3.0,
         },
+        headers=headers,
     )
     assert res_cfg.status_code == 200
     assert res_cfg.json()["stake"] == 2.0
     assert res_cfg.json()["cooldown_seconds"] == 3.0
 
     # 4. Toggle Desligar
-    res_off = client.post("/api/v1/auto-trader/toggle", json={"enabled": False})
+    res_off = client.post("/api/v1/auto-trader/toggle", json={"enabled": False}, headers=headers)
     assert res_off.status_code == 200
     assert res_off.json()["enabled"] is False
+    get_settings.cache_clear()
+
+
+@pytest.mark.asyncio
+async def test_auto_trader_real_signal_reaches_executor(test_setup):
+    """Um StrategySignal real precisa chegar ao executor. MagicMock escondia o AttributeError."""
+    from backend.app.modules.strategy_lab.base import SignalDirection, StrategySignal
+
+    engine = test_setup["engine"]
+    collector = test_setup["collector"]
+    engine.set_enabled(True)
+    for i in range(60):
+        digit = i % 10
+        collector.buffer.append(
+            TickData(
+                epoch=1000 + i,
+                quote=100.0 + i,
+                symbol="R_100",
+                last_digit=digit,
+                is_even=(digit % 2 == 0),
+            )
+        )
+    real_signal = StrategySignal(
+        strategy_id="ensemble",
+        direction=SignalDirection.EVEN,
+        estimated_prob=0.56,
+        confidence_lower_bound=0.52,
+        net_ev_ratio=0.09,
+        stake=1.0,
+        payout=1.95,
+        break_even_prob=0.5128,
+        timestamp=0,
+        rationale="teste",
+    )
+    engine.ensemble_strategy.evaluate = lambda **kwargs: real_signal
+    called = []
+
+    async def fake_exec(signal):
+        called.append(signal.estimated_prob)
+
+    engine._execute_and_settle = fake_exec
+    engine.on_tick_received(TickData(epoch=2000, quote=1.0, symbol="R_100", last_digit=2, is_even=True))
+    await asyncio.sleep(0)
+    assert "SINAL DETECTADO" in engine.last_decision
+    assert called == [0.56]
+
+
+@pytest.mark.asyncio
+async def test_symbol_mismatch_warns_and_resubscribes(test_setup):
+    """Tick de outro símbolo não pode ser ignorado em silêncio."""
+    engine = test_setup["engine"]
+    client = test_setup["client"]
+    client.subscribe_ticks = AsyncMock()
+    engine.set_enabled(True)
+    engine.last_decision = "Radar autônomo ativo. Monitorando ticks e calculando anomalias estatísticas..."
+
+    engine.on_tick_received(TickData(epoch=3000, quote=1.0, symbol="R_50", last_digit=4, is_even=True))
+    await asyncio.sleep(0)
+
+    assert "Símbolo divergente" in engine.last_decision
+    assert "R_50" in engine.last_decision
+    assert "R_100" in engine.last_decision
+    client.subscribe_ticks.assert_awaited_with("R_100")
+    assert engine.total_trades == 0

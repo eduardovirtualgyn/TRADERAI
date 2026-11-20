@@ -40,7 +40,7 @@ def get_deriv_status(
 ) -> dict:
     """Retorna o estado da conexão, símbolos vigentes e informações da conta DEMO."""
     auth_info = client.auth_info
-    is_connected = client.state in (DerivConnectionState.CONNECTED, DerivConnectionState.AUTHORIZED)
+    is_connected = client.is_connected
 
     account_data = {
         "is_virtual": auth_info.is_virtual if auth_info else False,
@@ -54,8 +54,12 @@ def get_deriv_status(
         "connection_state": client.state.value,
         "is_connected": is_connected,
         "is_authorized": client.is_authorized,
+        "is_simulated": client.is_simulated,
+        "session_mode": client.session_mode,
+        "trading_channel": client.trading_channel,
+        "last_error": client.last_error,
         "app_id": client.app_id,
-        "ws_url": client.ws_url,
+        "ws_url": client.redacted_endpoint,
         "default_symbol": settings.deriv_default_symbol,
         "active_symbols": client._active_symbols,
         "account_info": account_data,
@@ -85,9 +89,12 @@ async def connect_deriv(
         )
 
     client.demo_token = token_to_use
+    target_symbol = payload.symbol or settings.deriv_default_symbol
+    is_pat = str(token_to_use).startswith("pat_")
 
-    # ETAPA 1: Conexão WebSocket (Handshake)
-    if not client.is_connected:
+    # Token legado precisa do handshake v3 antes do authorize.
+    # PAT autentica por REST e abre ele mesmo o WebSocket /ws/demo?otp=...
+    if not is_pat and not client.is_connected:
         try:
             await client.connect()
         except DerivConnectionError as conn_err:
@@ -109,14 +116,7 @@ async def connect_deriv(
                 detail=fallback_err.to_dict(),
             ) from exc
 
-    # ETAPA 2: Subscrição do feed de cotações (Inicia o streaming imediatamente)
-    target_symbol = payload.symbol or settings.deriv_default_symbol
-    try:
-        await client.subscribe_ticks(target_symbol)
-    except Exception as exc:
-        logger.warning("Aviso: falha ao assinar ticks de %s imediatamente: %s", target_symbol, exc)
-
-    # ETAPA 3: Autenticação da Conta DEMO
+    # Autenticação da Conta DEMO (antes de assinar ticks: a sessão de trade é o socket demo)
     try:
         auth_info = await client.authorize(token=token_to_use)
     except TraderSecurityError as sec_err:
@@ -154,24 +154,52 @@ async def connect_deriv(
             },
         ) from exc
 
-    # ETAPA 4: Atualização de saldo
+    if client.is_simulated:
+        logger.warning(
+            "Sessão SIMULADOR opt-in. Ticks da Deriv não serão assinados e nenhuma ordem sai da máquina."
+        )
+    else:
+        try:
+            await client.subscribe_ticks(target_symbol)
+        except Exception as exc:
+            client.last_error = f"Autenticado, mas falha ao assinar ticks de {target_symbol}: {exc}"
+            logger.error(client.last_error)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={
+                    "success": False,
+                    "error_type": "Erro operacional",
+                    "code": "SUBSCRIBE_FAILED",
+                    "message": f"Falha ao assinar ticks de {target_symbol}.",
+                    "detail": str(exc),
+                    "http_status": 502,
+                    "stage": "MARKET_DATA",
+                },
+            ) from exc
+
     if auth_info and auth_info.balance > 0:
         risk_manager.balance_usd = auth_info.balance
 
     logger.info(
-        "✅ Conexão e autorização DEMO concluídas com sucesso. Conta: %s | Saldo: US$ %.2f",
+        "Autorização concluída. Modo: %s | Conta: %s | Canal: %s | Saldo: US$ %.2f",
+        client.session_mode,
         auth_info.loginid,
+        client.trading_channel,
         auth_info.balance,
     )
 
     return {
         "success": True,
         "state": client.state.value,
-        "is_authorized": True,
+        "is_authorized": client.is_authorized,
+        "is_simulated": client.is_simulated,
+        "session_mode": client.session_mode,
+        "trading_channel": client.trading_channel,
+        "last_error": client.last_error,
         "loginid": auth_info.loginid,
         "balance": auth_info.balance,
         "currency": auth_info.currency,
-        "subscribed_symbol": target_symbol,
+        "subscribed_symbol": None if client.is_simulated else target_symbol,
     }
 
 
@@ -199,8 +227,11 @@ def set_demo_balance(
     client: DerivWebSocketClient = Depends(get_deriv_client),
     risk_manager: RiskManager = Depends(get_risk_manager),
 ) -> dict:
-    """Atualiza o saldo demonstrativo em memória e no gerenciador de risco."""
-    new_bal = client.set_balance(payload.balance)
+    """Atualiza o saldo do simulador opt-in. Conta demo recusa este atalho."""
+    try:
+        new_bal = client.set_balance(payload.balance)
+    except DerivOperationalError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.to_dict()) from exc
     risk_manager.balance_usd = new_bal
     logger.info("Saldo DEMO atualizado manualmente para US$ %.2f", new_bal)
     return {

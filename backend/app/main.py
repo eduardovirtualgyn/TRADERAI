@@ -5,8 +5,10 @@ from typing import AsyncGenerator
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from backend.app.api.operator_middleware import OperatorAuthMiddleware
 from backend.app.api.v1.router import api_v1_router
 from backend.app.core.config import get_settings
+from backend.app.core.operator_auth import ensure_production_operator_token, parse_cors_origins
 from backend.app.core.errors import (
     AntiMartingaleViolationError,
     KillSwitchActiveError,
@@ -35,9 +37,45 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.critical("🚨 FALHA CRÍTICA DE SEGURANÇA: Tentativa de iniciar em modo não-DEMO.")
         raise TraderSecurityError("Operação bloqueada: apenas o modo DEMO é permitido.")
 
+    ensure_production_operator_token(settings)
+    if settings.trader_api_token:
+        logger.info("🔐 Autenticação do operador ativa. O token não é registrado no log.")
+    else:
+        logger.warning(
+            "TRADER_API_TOKEN ausente. Mutações da API ficam recusadas. "
+            "Em APP_ENV=production o processo nem chega aqui."
+        )
+
     # Conexão automática em segundo plano com a Deriv API (não-bloqueante)
     connect_task = None
-    if settings.deriv_demo_token and settings.deriv_demo_token != "seu_token_demo_aqui":
+    demo_token = settings.deriv_demo_token
+    missing_token = not demo_token or demo_token == "seu_token_demo_aqui"
+    if settings.deriv_simulator and missing_token:
+        from backend.app.api.deps import get_auto_trader, get_deriv_client, get_risk_manager, get_tick_collector
+
+        client = get_deriv_client()
+        client.enable_explicit_simulator(settings.deriv_demo_initial_balance)
+        if client.auth_info is not None:
+            get_risk_manager().balance_usd = client.auth_info.balance
+        _ = get_tick_collector()
+        _ = get_auto_trader()
+        logger.warning(
+            "DERIV_SIMULATOR=true sem token: simulador opt-in ligado (loginid=SIMULATOR). "
+            "Nenhuma ordem será enviada à Deriv e o painel não deve ser lido como conta demo."
+        )
+    elif missing_token:
+        from backend.app.api.deps import get_deriv_client
+        from backend.app.modules.deriv_client.models import DerivConnectionState
+
+        client = get_deriv_client()
+        client.state = DerivConnectionState.ERROR
+        client.session_mode = "error"
+        client.last_error = (
+            "DERIV_DEMO_TOKEN ausente. O robô não conecta e não entra em simulador. "
+            "Gere um PAT de conta demo com escopo trade, ou ligue DERIV_SIMULATOR=true para o modo local."
+        )
+        logger.error(client.last_error)
+    if demo_token and demo_token != "seu_token_demo_aqui":
         import asyncio
         from backend.app.api.deps import (
             get_auto_trader,
@@ -56,11 +94,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             for attempt in range(1, max_attempts + 1):
                 try:
                     await asyncio.sleep(0.5 if attempt == 1 else base_delay * (2 ** (attempt - 2)))
-                    logger.info("Tentativa %d/%d de auto-conexão WebSocket com a Deriv...", attempt, max_attempts)
-                    if not client.is_connected:
-                        await client.connect()
-                    await client.subscribe_ticks(settings.deriv_default_symbol)
+                    logger.info("Tentativa %d/%d de auto-conexão com a Deriv...", attempt, max_attempts)
                     auth_info = await client.authorize()
+                    await client.subscribe_ticks(settings.deriv_default_symbol)
                     risk_mgr = get_risk_manager()
                     if auth_info.balance > 0:
                         risk_mgr.balance_usd = auth_info.balance
@@ -105,13 +141,18 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Middleware CORS
+    # CORS sem curinga. O painel fala com /api/backend no mesmo host, então
+    # a lista pode ficar vazia. Credencial de cookie não é usada.
+    origins = parse_cors_origins(settings.cors_allow_origins)
+    if "*" in (settings.cors_allow_origins or ""):
+        logger.warning("CORS_ALLOW_ORIGINS contém '*', que foi ignorado. Informe origens explícitas.")
+    app.add_middleware(OperatorAuthMiddleware)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Trader-Token", "Accept"],
     )
 
     # Handlers Globais para Exceções do Domínio de Risco e Segurança

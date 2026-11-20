@@ -11,9 +11,9 @@ import {
   TickSummary,
 } from "@/types";
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ||
-  (typeof window !== "undefined" ? "/api/backend" : "http://backend:8000/api/v1");
+// Sempre o proxy do Next. Ele anexa TRADER_API_TOKEN no servidor.
+// O browser não recebe esse segredo e não fala com a porta do backend.
+const API_BASE = "/api/backend";
 
 export interface ApiStructuredError extends Error {
   error_type?: string;

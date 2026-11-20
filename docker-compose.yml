@@ -7,16 +7,34 @@ services:
       dockerfile: Dockerfile
     container_name: odd_even_ai_backend
     restart: unless-stopped
-    ports:
-      - "${BACKEND_PORT:-8001}:8000"
+    # A API não é publicada no host. O browser fala só com o frontend, que
+    # faz proxy em /api/backend pela rede Docker (http://backend:8000).
+    # Publicar 8001 em 0.0.0.0 deixa a API na internet, e porta publicada
+    # pelo Docker não passa pelo ufw. Para depurar na própria VPS, no máximo:
+    # ports:
+    #   - "127.0.0.1:${BACKEND_PORT:-8001}:8000"
     environment:
+      - APP_ENV=${APP_ENV:-production}
+      - TRADER_API_TOKEN=${TRADER_API_TOKEN:-}
+      - CORS_ALLOW_ORIGINS=${CORS_ALLOW_ORIGINS:-}
       - ACCOUNT_MODE=DEMO
       - ALLOW_REAL_ACCOUNT=False
       - DATABASE_URL=postgresql://deriv_user:deriv_pass@postgres:5432/deriv_trader
       - REDIS_URL=redis://redis:6379/0
       - DERIV_DEMO_TOKEN=${DERIV_DEMO_TOKEN:-}
       - DERIV_APP_ID=${DERIV_APP_ID:-1089}
-      - DERIV_WS_URL=${DERIV_WS_URL:-wss://ws.derivws.com/websockets/v3}
+      - DERIV_WS_URL=${DERIV_WS_URL:-wss://api.derivws.com/trading/v1/options/ws/public}
+      - DERIV_REST_BASE_URL=${DERIV_REST_BASE_URL:-https://api.derivws.com}
+      - DERIV_DEFAULT_SYMBOL=${DERIV_DEFAULT_SYMBOL:-R_100}
+      - DERIV_SIMULATOR=${DERIV_SIMULATOR:-false}
+      - AUTO_TRADER_STAKE=${AUTO_TRADER_STAKE:-1.0}
+      - RISK_MAX_STAKE_USD=${RISK_MAX_STAKE_USD:-5.00}
+      - RISK_MAX_STAKE_PERCENT=${RISK_MAX_STAKE_PERCENT:-0.05}
+      - RISK_MIN_OPERABLE_STAKE_USD=${RISK_MIN_OPERABLE_STAKE_USD:-1.00}
+      - RISK_MAX_CONSECUTIVE_LOSSES=${RISK_MAX_CONSECUTIVE_LOSSES:-3}
+      - RISK_MAX_DAILY_LOSS_USD=${RISK_MAX_DAILY_LOSS_USD:-25.00}
+      - RISK_KILL_SWITCH_ACTIVE=${RISK_KILL_SWITCH_ACTIVE:-False}
+      - RISK_BAN_MARTINGALE=${RISK_BAN_MARTINGALE:-True}
     depends_on:
       postgres:
         condition: service_healthy
@@ -35,6 +53,7 @@ services:
       - "${FRONTEND_PORT:-3000}:3000"
     environment:
       - BACKEND_INTERNAL_URL=http://backend:8000/api/v1
+      - TRADER_API_TOKEN=${TRADER_API_TOKEN:-}
     depends_on:
       - backend
     networks:

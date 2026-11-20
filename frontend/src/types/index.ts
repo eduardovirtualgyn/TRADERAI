@@ -4,6 +4,10 @@ export interface DerivStatus {
   state: "DISCONNECTED" | "CONNECTING" | "CONNECTED" | "AUTHORIZED" | "ERROR";
   is_connected: boolean;
   is_authorized: boolean;
+  is_simulated?: boolean;
+  session_mode?: "demo" | "simulator" | "unauthorized" | "error" | "disconnected";
+  trading_channel?: string;
+  last_error?: string | null;
   active_symbols: string[];
   account_info: {
     loginid: string;
@@ -21,6 +25,8 @@ export interface RiskStatus {
   max_consecutive_losses: number;
   max_stake_usd: number;
   max_stake_percent: number;
+  min_operable_stake_usd?: number;
+  drawdown_utc_date?: string;
   ban_martingale: boolean;
   kill_switch_active: boolean;
   kill_switch_reason: string | null;

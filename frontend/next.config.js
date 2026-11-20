@@ -1,19 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  async rewrites() {
-    const backendUrl =
-      process.env.BACKEND_INTERNAL_URL ||
-      process.env.NEXT_PUBLIC_API_URL ||
-      "http://backend:8000/api/v1";
-
-    return [
-      {
-        source: "/api/backend/:path*",
-        destination: `${backendUrl}/:path*`,
-      },
-    ];
-  },
+  // O proxy que injeta TRADER_API_TOKEN está em
+  // src/app/api/backend/[...path]/route.ts. Um rewrite não consegue
+  // acrescentar esse header sem expô-lo ao browser.
 };
 
 module.exports = nextConfig;

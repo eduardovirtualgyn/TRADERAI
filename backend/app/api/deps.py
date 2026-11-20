@@ -12,6 +12,7 @@ from backend.app.modules.tick_collector.collector import TickCollector
 from backend.app.modules.contract_executor.executor import ContractExecutor
 from backend.app.modules.audit_logger.ledger import AuditLedger
 from backend.app.modules.auto_trader.engine import AutoTraderEngine
+from backend.app.modules.auto_trader.models import AutoTraderConfig
 
 _risk_manager_instance: RiskManager | None = None
 _deriv_client_instance: DerivWebSocketClient | None = None
@@ -34,6 +35,7 @@ def get_risk_manager() -> RiskManager:
             initial_balance_usd=settings.deriv_demo_initial_balance,
             max_stake_usd=settings.risk_max_stake_usd,
             max_stake_percent=settings.risk_max_stake_percent,
+            min_operable_stake_usd=settings.risk_min_operable_stake_usd,
             max_consecutive_losses=settings.risk_max_consecutive_losses,
             max_daily_loss_usd=settings.risk_max_daily_loss_usd,
             ban_martingale=settings.risk_ban_martingale,
@@ -47,10 +49,15 @@ def get_deriv_client() -> DerivWebSocketClient:
     global _deriv_client_instance
     if _deriv_client_instance is None:
         settings = get_settings()
+        token = settings.deriv_demo_token
+        if token == "seu_token_demo_aqui":
+            token = None
         _deriv_client_instance = DerivWebSocketClient(
             ws_url=settings.deriv_ws_url,
             app_id=settings.deriv_app_id,
-            demo_token=settings.deriv_demo_token,
+            demo_token=token,
+            rest_base_url=settings.deriv_rest_base_url,
+            simulator_enabled=settings.deriv_simulator,
         )
     return _deriv_client_instance
 
@@ -143,6 +150,7 @@ def get_auto_trader() -> AutoTraderEngine:
         ensemble_strat = EnsembleStrategy(ensemble=ensemble)
         executor = get_contract_executor()
         risk_mgr = get_risk_manager()
+        settings = get_settings()
         _auto_trader_instance = AutoTraderEngine(
             deriv_client=client,
             tick_collector=collector,
@@ -150,5 +158,10 @@ def get_auto_trader() -> AutoTraderEngine:
             ensemble_strategy=ensemble_strat,
             contract_executor=executor,
             risk_manager=risk_mgr,
+            config=AutoTraderConfig(
+                enabled=True,
+                symbol=settings.deriv_default_symbol,
+                stake=settings.auto_trader_stake,
+            ),
         )
     return _auto_trader_instance

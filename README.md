@@ -75,8 +75,7 @@ cd "c:\TRADER AI"
 cp .env.example .env
 ```
 
-Edite o arquivo `.env` para inserir seu `DERIV_DEMO_TOKEN`.  
-> **Importante:** Obtenha seu token DEMO em **Deriv > Configurações da Conta > API Token** (marcando permissões de *Read* e *Trade* para a conta de demonstração **VRTC...**).
+Edite o arquivo `.env` para inserir um PAT de **conta demo** com escopo `trade` em `DERIV_DEMO_TOKEN`, o `DERIV_APP_ID` do aplicativo que emitiu esse token, e um `TRADER_API_TOKEN` longo. Esse segredo é do painel, não é o PAT da Deriv, e não pode ir para o JavaScript. O uvicorn carrega o `.env` da raiz sozinho. Token só de conta real é recusado. `DERIV_SIMULATOR=true` sem PAT liga um simulador local rotulado; não é o que acontece quando a autenticação falha.
 
 ---
 
@@ -109,7 +108,7 @@ npm install
 npm run dev
 ```
 
-A interface visual estará acessível em `http://localhost:3000`.
+A interface visual estará acessível em `http://localhost:3000`. Exporte o mesmo `TRADER_API_TOKEN` neste processo (`TRADER_API_TOKEN=... npm run dev`). O browser chama `/api/backend`; o Next anexa o segredo ao encaminhar para o backend.
 
 ---
 
@@ -120,8 +119,8 @@ docker-compose up --build -d
 ```
 
 Serviços inicializados:
-- **Frontend Dashboard:** porta `3000` (`http://localhost:3000`)
-- **FastAPI Backend (Swagger):** porta `8001` (`http://localhost:8001/docs`)
+- **Frontend Dashboard:** porta `3000` (`http://localhost:3000`). O browser chama `/api/backend`, e o Next encaminha para `http://backend:8000/api/v1` na rede Docker, anexando `TRADER_API_TOKEN`.
+- **FastAPI Backend:** não é publicado no host. Em `APP_ENV=production` ele não sobe sem `TRADER_API_TOKEN`.
 - **PostgreSQL:** porta `5433`
 - **Redis:** porta `6380`
 
