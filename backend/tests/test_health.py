@@ -82,10 +82,10 @@ def test_deriv_status_endpoint():
     from backend.app.api.v1.deriv import get_deriv_status
     from backend.app.modules.deriv_client.client import DerivWebSocketClient
 
-    client = DerivWebSocketClient(ws_url="wss://ws.derivws.com/websockets/v3", app_id=1089)
+    client = DerivWebSocketClient(ws_url="wss://ws.derivws.com/websockets/v3", app_id="1089")
     status_payload = get_deriv_status(settings=Settings(), client=client)
 
     assert status_payload["connection_state"] == "DISCONNECTED"
     assert status_payload["is_authorized"] is False
-    assert status_payload["app_id"] == 1089
+    assert status_payload["app_id"] == "1089"
     assert status_payload["default_symbol"] == "R_100"

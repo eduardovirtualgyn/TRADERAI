@@ -70,9 +70,9 @@ class Settings(BaseModel):
         default=False,
         description="Simulador local opt-in. Nunca é fallback de falha de autenticação.",
     )
-    deriv_app_id: int = Field(
-        default=1089,
-        description="App ID registrado na Deriv (1089 para testes)",
+    deriv_app_id: str = Field(
+        default="",
+        description="App ID do aplicativo que emitiu o PAT. Pode ser alfanumérico.",
     )
     deriv_demo_token: Optional[str] = Field(
         default=None,
@@ -149,6 +149,11 @@ class Settings(BaseModel):
         description="URL de conexão Redis",
     )
 
+    @field_validator("deriv_app_id", mode="before")
+    @classmethod
+    def validate_deriv_app_id(cls, v: object) -> str:
+        return normalize_app_id(v)
+
     @field_validator("deriv_ws_url")
     @classmethod
     def validate_deriv_ws_url(cls, v: str) -> str:
@@ -189,6 +194,19 @@ class Settings(BaseModel):
         return v
 
 
+def normalize_app_id(value: Optional[object]) -> str:
+    """App ID da Deriv como texto. O portal novo emite IDs alfanuméricos.
+
+    Remove espaços e aspas que o compose ou um `.env` às vezes incluem no valor.
+    """
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "'\"":
+        text = text[1:-1].strip()
+    return text.strip().strip("'\"")
+
+
 def _env_flag(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None or raw.strip() == "":
@@ -214,7 +232,7 @@ def load_settings_from_env() -> Settings:
             "wss://api.derivws.com/trading/v1/options/ws/public",
         ),
         "deriv_rest_base_url": os.getenv("DERIV_REST_BASE_URL", "https://api.derivws.com"),
-        "deriv_app_id": int(os.getenv("DERIV_APP_ID", "1089")),
+        "deriv_app_id": normalize_app_id(os.getenv("DERIV_APP_ID", "")),
         "deriv_demo_token": os.getenv("DERIV_DEMO_TOKEN"),
         "deriv_default_symbol": os.getenv("DERIV_DEFAULT_SYMBOL", "R_100"),
         "deriv_simulator": _env_flag("DERIV_SIMULATOR", False),

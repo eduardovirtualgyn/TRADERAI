@@ -64,10 +64,13 @@ def _http_error(status: int, payload: dict):
 
 @pytest.mark.asyncio
 async def test_pat_official_shape_opens_demo_otp_socket():
-    client = DerivWebSocketClient(app_id=1089, rest_base_url="http://offline.test")
+    client = DerivWebSocketClient(app_id="AppTest9Kx2nQ7", rest_base_url="http://offline.test")
     calls = []
+    sent_app_ids = []
 
     def fake_urlopen(request, timeout=8):
+        headers = {key.lower(): value for key, value in request.header_items()}
+        sent_app_ids.append(headers.get("deriv-app-id"))
         calls.append((request.get_method(), request.full_url))
         if request.get_method() == "GET":
             return _Response(
@@ -106,11 +109,14 @@ async def test_pat_official_shape_opens_demo_otp_socket():
     assert "/ws/real" not in opened
     assert any(method == "POST" and "/VRTC9001/otp" in url for method, url in calls)
     assert client.auth_info.loginid != "VRTC_SIMULATOR"
+    assert sent_app_ids
+    assert sent_app_ids[0] == "AppTest9Kx2nQ7"
+    assert all(value == "AppTest9Kx2nQ7" for value in sent_app_ids)
 
 
 @pytest.mark.asyncio
 async def test_real_only_token_is_refused_and_not_simulated():
-    client = DerivWebSocketClient(rest_base_url="http://offline.test")
+    client = DerivWebSocketClient(app_id="AppTest9Kx2nQ7", rest_base_url="http://offline.test")
 
     def fake_urlopen(request, timeout=8):
         return _Response(
@@ -139,7 +145,7 @@ async def test_real_only_token_is_refused_and_not_simulated():
 
 @pytest.mark.asyncio
 async def test_otp_real_websocket_is_refused():
-    client = DerivWebSocketClient(rest_base_url="http://offline.test")
+    client = DerivWebSocketClient(app_id="AppTest9Kx2nQ7", rest_base_url="http://offline.test")
 
     def fake_urlopen(request, timeout=8):
         if request.get_method() == "GET":
@@ -169,7 +175,7 @@ async def test_otp_real_websocket_is_refused():
 
 @pytest.mark.asyncio
 async def test_http_401_does_not_create_simulator():
-    client = DerivWebSocketClient(rest_base_url="http://offline.test")
+    client = DerivWebSocketClient(app_id="AppTest9Kx2nQ7", rest_base_url="http://offline.test")
 
     def fake_urlopen(request, timeout=8):
         raise _http_error(401, {"errors": [{"code": "Unauthorized", "message": "Invalid token"}]})
@@ -289,3 +295,19 @@ def test_manual_balance_requires_simulator():
     with pytest.raises(DerivOperationalError, match="simulador"):
         client.set_balance(250)
     assert client.auth_info is None
+
+
+def test_legacy_ws_query_keeps_alphanumeric_app_id():
+    client = DerivWebSocketClient(app_id="AppTest9Kx2nQ7")
+    url = client._prepare_ws_url("wss://ws.derivws.com/websockets/v3")
+    assert "app_id=AppTest9Kx2nQ7" in url
+
+
+@pytest.mark.asyncio
+async def test_pat_without_app_id_logs_and_does_not_crash():
+    client = DerivWebSocketClient(app_id="  ", rest_base_url="http://offline.test")
+    assert client.app_id == ""
+    with pytest.raises(DerivConfigError, match="DERIV_APP_ID"):
+        await client.authorize("pat_unit_test_token_not_real")
+    assert client.session_mode == "error"
+    assert "alfanumérico" in (client.last_error or "")

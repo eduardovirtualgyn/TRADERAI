@@ -46,9 +46,36 @@ def test_dotenv_file_is_applied_to_settings(tmp_path, monkeypatch):
     get_settings.cache_clear()
     try:
         settings = load_settings_from_env()
-        assert settings.deriv_app_id == 4242
+        assert settings.deriv_app_id == "4242"
+        assert isinstance(settings.deriv_app_id, str)
     finally:
         monkeypatch.delenv("DERIV_APP_ID", raising=False)
+        get_settings.cache_clear()
+
+
+def test_alphanumeric_deriv_app_id_loads_as_text(monkeypatch):
+    """O portal novo emite App ID alfanumérico. Isso não pode virar int()."""
+    from backend.app.core.config import get_settings, load_settings_from_env
+
+    monkeypatch.setenv("DERIV_APP_ID", "  'AppTest9Kx2nQ7'  ")
+    get_settings.cache_clear()
+    try:
+        settings = load_settings_from_env()
+        assert settings.deriv_app_id == "AppTest9Kx2nQ7"
+        assert isinstance(settings.deriv_app_id, str)
+    finally:
+        get_settings.cache_clear()
+
+
+def test_empty_deriv_app_id_does_not_crash(monkeypatch):
+    from backend.app.core.config import get_settings, load_settings_from_env
+
+    monkeypatch.setenv("DERIV_APP_ID", "")
+    get_settings.cache_clear()
+    try:
+        settings = load_settings_from_env()
+        assert settings.deriv_app_id == ""
+    finally:
         get_settings.cache_clear()
 
 

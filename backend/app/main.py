@@ -75,7 +75,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "Gere um PAT de conta demo com escopo trade, ou ligue DERIV_SIMULATOR=true para o modo local."
         )
         logger.error(client.last_error)
-    if demo_token and demo_token != "seu_token_demo_aqui":
+    pat_without_app_id = (
+        bool(demo_token)
+        and str(demo_token).startswith("pat_")
+        and not settings.deriv_app_id
+    )
+    if pat_without_app_id:
+        from backend.app.api.deps import get_deriv_client
+        from backend.app.modules.deriv_client.models import DerivConnectionState
+
+        client = get_deriv_client()
+        client.state = DerivConnectionState.ERROR
+        client.session_mode = "error"
+        client.last_error = (
+            "DERIV_APP_ID ausente. O portal de desenvolvedores da Deriv emite um App ID "
+            "alfanumérico para o aplicativo do PAT. Defina DERIV_APP_ID com esse valor. "
+            "O processo segue no ar, mas não autentica enquanto o ID estiver vazio."
+        )
+        logger.error(client.last_error)
+    elif demo_token and demo_token != "seu_token_demo_aqui":
         import asyncio
         from backend.app.api.deps import (
             get_auto_trader,

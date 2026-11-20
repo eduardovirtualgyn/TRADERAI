@@ -27,7 +27,7 @@ async def test_deriv_client_live_connection_and_ticks():
             "DERIV_WS_URL",
             "wss://api.derivws.com/trading/v1/options/ws/public",
         ),
-        app_id=int(os.getenv("DERIV_APP_ID", "1089")),
+        app_id=os.getenv("DERIV_APP_ID", ""),
         rest_base_url=os.getenv("DERIV_REST_BASE_URL", "https://api.derivws.com"),
     )
     received_ticks = []

@@ -121,8 +121,7 @@ docker-compose up --build -d
 Serviços inicializados:
 - **Frontend Dashboard:** porta `3000` (`http://localhost:3000`). O browser chama `/api/backend`, e o Next encaminha para `http://backend:8000/api/v1` na rede Docker, anexando `TRADER_API_TOKEN`.
 - **FastAPI Backend:** não é publicado no host. Em `APP_ENV=production` ele não sobe sem `TRADER_API_TOKEN`.
-- **PostgreSQL:** porta `5433`
-- **Redis:** porta `6380`
+- **PostgreSQL e Redis:** ficam só na rede Docker. As portas do host não são publicadas.
 
 ---
 

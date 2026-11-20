@@ -17,6 +17,7 @@ from typing import Any, Callable, Dict, List, Optional
 import websockets
 from websockets.client import WebSocketClientProtocol
 
+from backend.app.core.config import normalize_app_id
 from backend.app.core.errors import (
     DerivApiError,
     DerivAuthError,
@@ -130,13 +131,13 @@ class DerivWebSocketClient:
     def __init__(
         self,
         ws_url: str = "wss://ws.derivws.com/websockets/v3",
-        app_id: int = 1089,
+        app_id: str = "",
         demo_token: Optional[str] = None,
         rest_base_url: str = "https://api.derivws.com",
         simulator_enabled: bool = False,
     ):
         self.ws_url = ws_url
-        self.app_id = app_id
+        self.app_id = normalize_app_id(app_id)
         self.demo_token = demo_token
         self.rest_base_url = rest_base_url.rstrip("/")
         self.simulator_enabled = bool(simulator_enabled)
@@ -269,7 +270,7 @@ class DerivWebSocketClient:
             clean = f"{clean}/websockets/v3"
         sep = "&" if "?" in clean else "?"
         params = []
-        if "app_id=" not in clean:
+        if self.app_id and "app_id=" not in clean:
             params.append(f"app_id={self.app_id}")
         if "l=" not in clean:
             params.append("l=EN")
@@ -393,15 +394,17 @@ class DerivWebSocketClient:
         """Chama a Options API REST. Não envia o token para log."""
         url = f"{self.rest_base_url}{path}"
         data = b"" if method.upper() == "POST" else None
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+            "User-Agent": "ODD-EVEN-AI-TRADER",
+        }
+        if self.app_id:
+            headers["Deriv-App-ID"] = self.app_id
         request = urllib.request.Request(
             url,
             data=data,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Deriv-App-ID": str(self.app_id),
-                "Accept": "application/json",
-                "User-Agent": "ODD-EVEN-AI-TRADER",
-            },
+            headers=headers,
             method=method.upper(),
         )
         loop = asyncio.get_running_loop()
@@ -627,6 +630,20 @@ class DerivWebSocketClient:
 
     async def _authorize_pat(self, token: str) -> DerivAuthorizeResponse:
         """Fluxo oficial da Options API: contas, OTP e WebSocket demo."""
+        if not self.app_id:
+            message = (
+                "DERIV_APP_ID ausente. O portal de desenvolvedores da Deriv emite um App ID "
+                "alfanumérico para o aplicativo do PAT. Copie esse ID para DERIV_APP_ID. "
+                "Sem ele a Options API não autentica."
+            )
+            logger.error(message)
+            exc = DerivConfigError(
+                message=message,
+                detail=message,
+                code="MISSING_APP_ID",
+            )
+            self._reject_session(exc)
+            raise exc
         try:
             payload = await self._rest_json("GET", "/trading/v1/options/accounts", token)
         except (DerivAuthError, DerivConnectionError, TraderSecurityError) as exc:

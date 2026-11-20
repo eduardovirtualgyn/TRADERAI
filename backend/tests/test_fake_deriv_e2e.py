@@ -159,7 +159,7 @@ async def test_offline_demo_session_places_and_settles_a_loss():
 
     client = DerivWebSocketClient(
         ws_url="ws://127.0.0.1/unused",
-        app_id=1089,
+        app_id="AppTest9Kx2nQ7",
         rest_base_url=f"http://127.0.0.1:{http_port}",
         simulator_enabled=False,
     )
