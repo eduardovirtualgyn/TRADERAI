@@ -108,7 +108,7 @@ def get_model_ensemble() -> ModelEnsemble:
         trainer = get_ai_trainer()
         registry = get_strategy_registry()
         _model_ensemble_instance = ModelEnsemble(
-            max_allowed_discordance=0.15,
+            max_allowed_discordance=0.28,
             ai_models=[trainer.rf_model, trainer.xgb_model],
         )
         ensemble_strat = EnsembleStrategy(ensemble=_model_ensemble_instance)

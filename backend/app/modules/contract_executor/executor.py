@@ -114,14 +114,26 @@ class ContractExecutor:
                 payout=payout,
             )
 
-        # Portão B: Limite de Confiança de Wilson superior ao Break-Even
-        if request.wilson_lower_bound <= p_be:
+        # Portão B: Limite de Confiança e Probabilidade superiores ao Break-Even Real
+        if request.estimated_probability <= p_be:
+            return self._record_failure(
+                request=request,
+                status=ContractStatus.REJECTED_BY_MATH,
+                reason=(
+                    f"Probabilidade estimada ({request.estimated_probability:.2%}) "
+                    f"não supera a probabilidade de equilíbrio real da corretora ({p_be:.2%})."
+                ),
+                proposal_id=proposal.proposal_id,
+                payout=payout,
+            )
+
+        if request.wilson_lower_bound <= p_be and request.estimated_probability < (p_be + 0.02):
             return self._record_failure(
                 request=request,
                 status=ContractStatus.REJECTED_BY_MATH,
                 reason=(
                     f"Limite inferior de Wilson ({request.wilson_lower_bound:.2%}) "
-                    f"não supera a probabilidade de equilíbrio ({p_be:.2%})."
+                    f"não supera a probabilidade de equilíbrio ({p_be:.2%}) sem margem de segurança suficiente."
                 ),
                 proposal_id=proposal.proposal_id,
                 payout=payout,

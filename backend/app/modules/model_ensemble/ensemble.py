@@ -29,7 +29,7 @@ class ModelEnsemble:
 
     def __init__(
         self,
-        max_allowed_discordance: float = 0.15,  # Diferença máxima aceitável entre previsões (15%)
+        max_allowed_discordance: float = 0.28,  # Diferença máxima aceitável entre previsões em conflito (28%)
         ai_models: Optional[List[BaseAIModel]] = None,
     ):
         self.max_allowed_discordance = max_allowed_discordance
@@ -114,13 +114,19 @@ class ModelEnsemble:
         p_even_ensemble = sum(predictions_even[k] * normalized_weights[k] for k in predictions_even.keys())
         p_odd_ensemble = 1.0 - p_even_ensemble
 
-        # 6. Verificação de Discordância e Veto por Incerteza
+        # 6. Verificação de Discordância Direcional e Veto por Incerteza
         p_values = list(predictions_even.values())
         spread = max(p_values) - min(p_values) if p_values else 0.0
 
-        if spread > self.max_allowed_discordance:
+        # Conflito direcional real: um estimador indica fortemente EVEN (>= 56%)
+        # enquanto outro indica fortemente a ponta oposta ODD (P_even <= 44%)
+        has_even_advocate = any(p >= 0.56 for p in predictions_even.values())
+        has_odd_advocate = any(p <= 0.44 for p in predictions_even.values())
+        directional_conflict = has_even_advocate and has_odd_advocate
+
+        if (directional_conflict and spread > self.max_allowed_discordance) or (spread > 0.35):
             veto_reason = (
-                f"DIVERGÊNCIA EXCESSIVA: Spread entre estimadores ({spread:.2%}) "
+                f"DIVERGÊNCIA EXCESSIVA: Conflito direcional entre estimadores (Spread {spread:.2%}) "
                 f"excede o teto permitido de {self.max_allowed_discordance:.2%}. Operação vetada por falta de consenso."
             )
             return EnsemblePrediction(

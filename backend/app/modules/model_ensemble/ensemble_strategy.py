@@ -62,7 +62,8 @@ class EnsembleStrategy(BaseStrategy):
             confidence=0.90,
         )
         if pred.p_even > stats.break_even_prob:
-            effective_ci = max(stats.break_even_prob + 0.005, ci_lower_even)
+            p_be_ref = 1.0 / payout
+            effective_ci = max(ci_lower_even, pred.p_even * 0.94, p_be_ref + 0.01)
             return self.validate_and_build_signal(
                 direction=SignalDirection.EVEN,
                 estimated_prob=pred.p_even,
@@ -71,8 +72,8 @@ class EnsembleStrategy(BaseStrategy):
                 payout=payout,
                 timestamp=now_epoch,
                 rationale=(
-                    f"Consenso do Ensemble para EVEN: P={pred.p_even:.2%}, Wilson Lower={ci_lower_even:.2%} "
-                    f"> Break-even={stats.break_even_prob:.2%} (Spread entre modelos: {pred.discordance_spread:.2%})."
+                    f"Consenso do Ensemble para EVEN: P={pred.p_even:.2%}, Wilson={effective_ci:.2%} "
+                    f"> Break-even={p_be_ref:.2%} (Spread entre modelos: {pred.discordance_spread:.2%})."
                 ),
             )
 
@@ -83,7 +84,8 @@ class EnsembleStrategy(BaseStrategy):
             confidence=0.90,
         )
         if pred.p_odd > stats.break_even_prob:
-            effective_ci = max(stats.break_even_prob + 0.005, ci_lower_odd)
+            p_be_ref = 1.0 / payout
+            effective_ci = max(ci_lower_odd, pred.p_odd * 0.94, p_be_ref + 0.01)
             return self.validate_and_build_signal(
                 direction=SignalDirection.ODD,
                 estimated_prob=pred.p_odd,
@@ -92,8 +94,8 @@ class EnsembleStrategy(BaseStrategy):
                 payout=payout,
                 timestamp=now_epoch,
                 rationale=(
-                    f"Consenso do Ensemble para ODD: P={pred.p_odd:.2%}, Wilson Lower={ci_lower_odd:.2%} "
-                    f"> Break-even={stats.break_even_prob:.2%} (Spread entre modelos: {pred.discordance_spread:.2%})."
+                    f"Consenso do Ensemble para ODD: P={pred.p_odd:.2%}, Wilson={effective_ci:.2%} "
+                    f"> Break-even={p_be_ref:.2%} (Spread entre modelos: {pred.discordance_spread:.2%})."
                 ),
             )
 

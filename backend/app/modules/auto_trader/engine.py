@@ -175,18 +175,21 @@ class AutoTraderEngine:
             self.state = "SEARCHING_EDGE"
             pred = self.ensemble_strategy.ensemble.predict(ticks=ticks, stats=stats)
             p_max = max(pred.p_even, pred.p_odd)
-            self.last_decision = (
-                f"VETO MATEMÁTICO: Mercado em passeio aleatório uniforme (P_max={p_max:.1%}, "
-                f"Break-even={stats.break_even_prob:.1%}). Protegendo capital."
-            )
+            if not pred.is_consensus_achieved and pred.veto_reason:
+                self.last_decision = f"VETO ENSEMBLE: {pred.veto_reason}"
+            else:
+                self.last_decision = (
+                    f"VETO MATEMÁTICO: Mercado em passeio aleatório uniforme (P_max={p_max:.1%}, "
+                    f"Break-even={stats.break_even_prob:.1%}). Protegendo capital."
+                )
             return
 
-        # Filtro de confiança mínima configurada.
-        # StrategySignal expõe estimated_prob — o nome antigo derrubava todo tick.
-        if signal.estimated_prob < self.config.min_probability:
+        # Filtro de confiança mínima configurada
+        prob = getattr(signal, "estimated_prob", getattr(signal, "estimated_probability", 0.50))
+        if prob < self.config.min_probability:
             self.state = "SEARCHING_EDGE"
             self.last_decision = (
-                f"Probabilidade ({signal.estimated_prob:.1%}) abaixo do mínimo configurado ({self.config.min_probability:.1%})"
+                f"Probabilidade ({prob:.1%}) abaixo do mínimo configurado ({self.config.min_probability:.1%})"
             )
             return
 
@@ -202,7 +205,7 @@ class AutoTraderEngine:
         self.state = "EXECUTING"
         self.last_action_timestamp = now
         self.last_decision = (
-            f"🎯 SINAL DETECTADO: {signal.direction.value} | P={signal.estimated_prob:.1%}, "
+            f"🎯 SINAL DETECTADO: {signal.direction.value} | P={prob:.1%}, "
             f"Wilson={signal.confidence_lower_bound:.1%}. Disparando ordem autônoma..."
         )
         logger.info("🚀 [AUTO-TRADER] %s", self.last_decision)
@@ -216,6 +219,7 @@ class AutoTraderEngine:
     async def _execute_and_settle(self, signal) -> None:
         """Executa a ordem na Deriv e acompanha a liquidação até o encerramento."""
         contract_type = "DIGITEVEN" if signal.direction == SignalDirection.EVEN else "DIGITODD"
+        prob = getattr(signal, "estimated_prob", getattr(signal, "estimated_probability", 0.50))
         try:
             req = OrderRequest(
                 symbol=self.config.symbol,
@@ -223,7 +227,7 @@ class AutoTraderEngine:
                 stake=self.config.stake,
                 duration=1,
                 duration_unit="t",
-                estimated_probability=signal.estimated_prob,
+                estimated_probability=prob,
                 wilson_lower_bound=signal.confidence_lower_bound,
                 strategy_name="auto_trader_ai",
             )

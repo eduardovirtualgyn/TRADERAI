@@ -20,6 +20,7 @@ from backend.app.modules.model_ensemble.ensemble import ModelEnsemble
 from backend.app.modules.model_ensemble.ensemble_strategy import EnsembleStrategy
 from backend.app.modules.risk_manager.risk_rules import RiskManager
 from backend.app.modules.statistical_engine.evaluator import StatisticalEvaluator
+from backend.app.modules.strategy_lab.base import SignalDirection
 from backend.app.modules.tick_collector.collector import TickCollector
 
 
@@ -187,9 +188,11 @@ async def test_auto_trader_executes_and_settles(test_setup):
         contract_id="999888",
     )
     executor.settle_contract = MagicMock(return_value=mock_settled_res)
+    engine._wait_settlement = AsyncMock(return_value=mock_settled_res)
 
     signal = MagicMock()
     signal.direction.value = "EVEN"
+    signal.direction = SignalDirection.EVEN
     signal.estimated_prob = 0.58
     signal.confidence_lower_bound = 0.53
 
@@ -205,6 +208,7 @@ async def test_auto_trader_executes_and_settles(test_setup):
 def test_auto_trader_api(monkeypatch):
     monkeypatch.setenv("TRADER_API_TOKEN", "test-operator-token")
     monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("DERIV_DEMO_TOKEN", "")
     from backend.app.core.config import get_settings
 
     get_settings.cache_clear()

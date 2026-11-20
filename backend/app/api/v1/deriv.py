@@ -5,10 +5,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from backend.app.api.deps import (
+    get_auto_trader,
     get_deriv_client,
     get_risk_manager,
     get_tick_collector,
 )
+from backend.app.modules.auto_trader.engine import AutoTraderEngine
 from backend.app.core.config import Settings, get_settings
 from backend.app.core.errors import (
     DerivApiError,
@@ -74,6 +76,7 @@ async def connect_deriv(
     client: DerivWebSocketClient = Depends(get_deriv_client),
     collector: TickCollector = Depends(get_tick_collector),
     risk_manager: RiskManager = Depends(get_risk_manager),
+    auto_trader: AutoTraderEngine = Depends(get_auto_trader),
 ) -> dict:
     """Inicia a sessão WebSocket com a Deriv em conta virtual DEMO com tratamento estruturado de erros."""
     token_to_use = payload.token or client.demo_token or settings.deriv_demo_token
@@ -115,6 +118,9 @@ async def connect_deriv(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=fallback_err.to_dict(),
             ) from exc
+
+    target_symbol = payload.symbol or settings.deriv_default_symbol
+    auto_trader.config.symbol = target_symbol
 
     # Autenticação da Conta DEMO (antes de assinar ticks: a sessão de trade é o socket demo)
     try:

@@ -35,6 +35,11 @@ class StrategySignal:
     timestamp: int
     rationale: str
 
+    @property
+    def estimated_probability(self) -> float:
+        """Alias para interoperabilidade com OrderRequest e AutoTraderEngine."""
+        return self.estimated_prob
+
 
 class BaseStrategy(ABC):
     """Classe base abstrata para todas as estratégias do ODD/EVEN AI TRADER."""
