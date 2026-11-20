@@ -4,10 +4,34 @@ Aplica a salvaguarda estrita de operação exclusiva em conta DEMO.
 """
 
 import os
+import sys
 from functools import lru_cache
+from pathlib import Path
 from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 from backend.app.core.errors import TraderSecurityError
+
+
+def load_project_dotenv(path: Optional[Path] = None, *, force: bool = False) -> None:
+    """Carrega o `.env` da raiz. O uvicorn não faz isso sozinho.
+
+    Durante o pytest o carregamento automático fica desligado para um token
+    real presente no `.env` local não vazar para a suíte. `force=True` lê um
+    arquivo explícito.
+    """
+    # pytest já está carregado na coleta, antes de PYTEST_CURRENT_TEST existir.
+    if not force and ("pytest" in sys.modules or os.getenv("PYTEST_CURRENT_TEST")):
+        return
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return
+    if path is not None:
+        load_dotenv(path, override=False)
+        return
+    root = Path(__file__).resolve().parents[3]
+    load_dotenv(root / ".env", override=False)
+    load_dotenv(override=False)
 
 
 class Settings(BaseModel):
@@ -28,7 +52,15 @@ class Settings(BaseModel):
     # Deriv WebSocket API (Novo endpoint oficial Options API / Public Data)
     deriv_ws_url: str = Field(
         default="wss://api.derivws.com/trading/v1/options/ws/public",
-        description="Endpoint oficial da Deriv WebSocket API (Options / Public Data)",
+        description="WebSocket de mercado. A negociação PAT usa o URL demo devolvido pelo OTP.",
+    )
+    deriv_rest_base_url: str = Field(
+        default="https://api.derivws.com",
+        description="Base REST da Options API (contas e OTP). Sem barra no final.",
+    )
+    deriv_simulator: bool = Field(
+        default=False,
+        description="Simulador local opt-in. Nunca é fallback de falha de autenticação.",
     )
     deriv_app_id: int = Field(
         default=1089,
@@ -44,7 +76,11 @@ class Settings(BaseModel):
     )
     deriv_demo_initial_balance: float = Field(
         default=100.00,
-        description="Saldo inicial configurado para a conta DEMO em USD",
+        description="Saldo inicial do simulador opt-in. Na conta demo o saldo vem da Deriv.",
+    )
+    auto_trader_stake: float = Field(
+        default=1.0,
+        description="Stake padrão do Auto-Trader em USD",
     )
 
     # Parâmetros de Gestão de Risco
@@ -53,8 +89,12 @@ class Settings(BaseModel):
         description="Teto máximo em USD por operação",
     )
     risk_max_stake_percent: float = Field(
-        default=0.01,
-        description="Teto máximo proporcional por operação (1% da banca)",
+        default=0.05,
+        description="Teto proporcional por operação (padrão 5% para um stake de US$ 1 caber numa demo pequena)",
+    )
+    risk_min_operable_stake_usd: float = Field(
+        default=1.0,
+        description="Piso operável: o teto percentual não pode cair abaixo deste valor se a banca cobrir",
     )
     risk_max_consecutive_losses: int = Field(
         default=3,
@@ -101,6 +141,15 @@ class Settings(BaseModel):
         description="URL de conexão Redis",
     )
 
+    @field_validator("deriv_ws_url")
+    @classmethod
+    def validate_deriv_ws_url(cls, v: str) -> str:
+        if "/ws/real" in v.lower():
+            raise TraderSecurityError(
+                "VIOLAÇÃO DE SEGURANÇA: DERIV_WS_URL não pode apontar para o canal de conta REAL (/ws/real)."
+            )
+        return v
+
     @field_validator("account_mode")
     @classmethod
     def validate_account_mode(cls, v: str) -> str:
@@ -132,26 +181,41 @@ class Settings(BaseModel):
         return v
 
 
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() in ("true", "1", "yes", "on")
+
+
 def load_settings_from_env() -> Settings:
-    """Carrega as configurações a partir das variáveis de ambiente."""
+    """Carrega as configurações a partir das variáveis de ambiente e do `.env`."""
+    load_project_dotenv()
     account_mode = os.getenv("ACCOUNT_MODE", "DEMO")
-    allow_real = os.getenv("ALLOW_REAL_ACCOUNT", "False").lower() in ("true", "1", "yes")
+    allow_real = _env_flag("ALLOW_REAL_ACCOUNT", False)
 
     raw_kwargs = {
         "app_name": os.getenv("APP_NAME", "ODD_EVEN_AI_TRADER"),
         "app_env": os.getenv("APP_ENV", "development"),
         "account_mode": account_mode,
         "allow_real_account": allow_real,
-        "deriv_ws_url": os.getenv("DERIV_WS_URL", "wss://ws.derivws.com/websockets/v3"),
+        "deriv_ws_url": os.getenv(
+            "DERIV_WS_URL",
+            "wss://api.derivws.com/trading/v1/options/ws/public",
+        ),
+        "deriv_rest_base_url": os.getenv("DERIV_REST_BASE_URL", "https://api.derivws.com"),
         "deriv_app_id": int(os.getenv("DERIV_APP_ID", "1089")),
         "deriv_demo_token": os.getenv("DERIV_DEMO_TOKEN"),
         "deriv_default_symbol": os.getenv("DERIV_DEFAULT_SYMBOL", "R_100"),
+        "deriv_simulator": _env_flag("DERIV_SIMULATOR", False),
+        "auto_trader_stake": float(os.getenv("AUTO_TRADER_STAKE", "1.0")),
         "risk_max_stake_usd": float(os.getenv("RISK_MAX_STAKE_USD", "5.00")),
-        "risk_max_stake_percent": float(os.getenv("RISK_MAX_STAKE_PERCENT", "0.01")),
+        "risk_max_stake_percent": float(os.getenv("RISK_MAX_STAKE_PERCENT", "0.05")),
+        "risk_min_operable_stake_usd": float(os.getenv("RISK_MIN_OPERABLE_STAKE_USD", "1.00")),
         "risk_max_consecutive_losses": int(os.getenv("RISK_MAX_CONSECUTIVE_LOSSES", "3")),
         "risk_max_daily_loss_usd": float(os.getenv("RISK_MAX_DAILY_LOSS_USD", "25.00")),
-        "risk_kill_switch_active": os.getenv("RISK_KILL_SWITCH_ACTIVE", "False").lower() in ("true", "1", "yes"),
-        "risk_ban_martingale": os.getenv("RISK_BAN_MARTINGALE", "True").lower() not in ("false", "0", "no"),
+        "risk_kill_switch_active": _env_flag("RISK_KILL_SWITCH_ACTIVE", False),
+        "risk_ban_martingale": _env_flag("RISK_BAN_MARTINGALE", True),
         "min_acceptable_payout_ratio": float(os.getenv("MIN_ACCEPTABLE_PAYOUT_RATIO", "1.90")),
         "min_net_ev_ratio": float(os.getenv("MIN_NET_EV_RATIO", "0.01")),
         "confidence_level": float(os.getenv("CONFIDENCE_LEVEL", "0.95")),

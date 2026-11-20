@@ -37,7 +37,34 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Conexão automática em segundo plano com a Deriv API (não-bloqueante)
     connect_task = None
-    if settings.deriv_demo_token and settings.deriv_demo_token != "seu_token_demo_aqui":
+    demo_token = settings.deriv_demo_token
+    missing_token = not demo_token or demo_token == "seu_token_demo_aqui"
+    if settings.deriv_simulator and missing_token:
+        from backend.app.api.deps import get_auto_trader, get_deriv_client, get_risk_manager, get_tick_collector
+
+        client = get_deriv_client()
+        client.enable_explicit_simulator(settings.deriv_demo_initial_balance)
+        if client.auth_info is not None:
+            get_risk_manager().balance_usd = client.auth_info.balance
+        _ = get_tick_collector()
+        _ = get_auto_trader()
+        logger.warning(
+            "DERIV_SIMULATOR=true sem token: simulador opt-in ligado (loginid=SIMULATOR). "
+            "Nenhuma ordem será enviada à Deriv e o painel não deve ser lido como conta demo."
+        )
+    elif missing_token:
+        from backend.app.api.deps import get_deriv_client
+        from backend.app.modules.deriv_client.models import DerivConnectionState
+
+        client = get_deriv_client()
+        client.state = DerivConnectionState.ERROR
+        client.session_mode = "error"
+        client.last_error = (
+            "DERIV_DEMO_TOKEN ausente. O robô não conecta e não entra em simulador. "
+            "Gere um PAT de conta demo com escopo trade, ou ligue DERIV_SIMULATOR=true para o modo local."
+        )
+        logger.error(client.last_error)
+    if demo_token and demo_token != "seu_token_demo_aqui":
         import asyncio
         from backend.app.api.deps import (
             get_auto_trader,
@@ -56,11 +83,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             for attempt in range(1, max_attempts + 1):
                 try:
                     await asyncio.sleep(0.5 if attempt == 1 else base_delay * (2 ** (attempt - 2)))
-                    logger.info("Tentativa %d/%d de auto-conexão WebSocket com a Deriv...", attempt, max_attempts)
-                    if not client.is_connected:
-                        await client.connect()
-                    await client.subscribe_ticks(settings.deriv_default_symbol)
+                    logger.info("Tentativa %d/%d de auto-conexão com a Deriv...", attempt, max_attempts)
                     auth_info = await client.authorize()
+                    await client.subscribe_ticks(settings.deriv_default_symbol)
                     risk_mgr = get_risk_manager()
                     if auth_info.balance > 0:
                         risk_mgr.balance_usd = auth_info.balance

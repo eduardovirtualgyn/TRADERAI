@@ -16,7 +16,18 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - DERIV_DEMO_TOKEN=${DERIV_DEMO_TOKEN:-}
       - DERIV_APP_ID=${DERIV_APP_ID:-1089}
-      - DERIV_WS_URL=${DERIV_WS_URL:-wss://ws.derivws.com/websockets/v3}
+      - DERIV_WS_URL=${DERIV_WS_URL:-wss://api.derivws.com/trading/v1/options/ws/public}
+      - DERIV_REST_BASE_URL=${DERIV_REST_BASE_URL:-https://api.derivws.com}
+      - DERIV_DEFAULT_SYMBOL=${DERIV_DEFAULT_SYMBOL:-R_100}
+      - DERIV_SIMULATOR=${DERIV_SIMULATOR:-false}
+      - AUTO_TRADER_STAKE=${AUTO_TRADER_STAKE:-1.0}
+      - RISK_MAX_STAKE_USD=${RISK_MAX_STAKE_USD:-5.00}
+      - RISK_MAX_STAKE_PERCENT=${RISK_MAX_STAKE_PERCENT:-0.05}
+      - RISK_MIN_OPERABLE_STAKE_USD=${RISK_MIN_OPERABLE_STAKE_USD:-1.00}
+      - RISK_MAX_CONSECUTIVE_LOSSES=${RISK_MAX_CONSECUTIVE_LOSSES:-3}
+      - RISK_MAX_DAILY_LOSS_USD=${RISK_MAX_DAILY_LOSS_USD:-25.00}
+      - RISK_KILL_SWITCH_ACTIVE=${RISK_KILL_SWITCH_ACTIVE:-False}
+      - RISK_BAN_MARTINGALE=${RISK_BAN_MARTINGALE:-True}
     depends_on:
       postgres:
         condition: service_healthy

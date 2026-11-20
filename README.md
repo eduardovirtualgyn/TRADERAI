@@ -75,8 +75,7 @@ cd "c:\TRADER AI"
 cp .env.example .env
 ```
 
-Edite o arquivo `.env` para inserir seu `DERIV_DEMO_TOKEN`.  
-> **Importante:** Obtenha seu token DEMO em **Deriv > Configurações da Conta > API Token** (marcando permissões de *Read* e *Trade* para a conta de demonstração **VRTC...**).
+Edite o arquivo `.env` para inserir um PAT de **conta demo** com escopo `trade` em `DERIV_DEMO_TOKEN`, e o `DERIV_APP_ID` do aplicativo que emitiu esse token. O processo do uvicorn carrega esse arquivo sozinho. Token só de conta real é recusado. `DERIV_SIMULATOR=true` sem token liga um simulador local rotulado; não é o que acontece quando a autenticação falha.
 
 ---
 

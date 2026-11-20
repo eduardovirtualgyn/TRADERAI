@@ -36,8 +36,26 @@ export const Header: React.FC<HeaderProps> = ({
 
   const isConnected = derivStatus?.is_connected ?? false;
   const isAuthorized = derivStatus?.is_authorized ?? false;
-  const balance = riskStatus?.balance_usd ?? derivStatus?.account_info?.balance ?? 100.0;
+  const isSimulated = derivStatus?.is_simulated ?? derivStatus?.session_mode === "simulator";
+  const sessionMode = derivStatus?.session_mode;
+  const lastError = derivStatus?.last_error || null;
+  const balance = riskStatus?.balance_usd ?? derivStatus?.account_info?.balance ?? 0;
+  const hasBalance = riskStatus != null || derivStatus?.account_info != null;
   const killSwitchActive = riskStatus?.kill_switch_active ?? false;
+  const balanceLabel = isSimulated
+    ? "SALDO SIMULADO"
+    : isAuthorized && sessionMode === "demo"
+    ? "SALDO DEMO"
+    : "SALDO LOCAL";
+  const connectionLabel = isSimulated
+    ? "SIMULADOR (OPT-IN)"
+    : isAuthorized && sessionMode === "demo"
+    ? "AUTHORIZED (DEMO)"
+    : lastError
+    ? "ERRO"
+    : isConnected
+    ? "CONNECTED"
+    : "OFFLINE";
 
   const handlePanicClick = () => {
     if (!confirmPanic) {
@@ -133,14 +151,18 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="text-gray-300">DERIV WS:</span>
               <span
                 className={
-                  isAuthorized
+                  isSimulated
+                    ? "text-amber-300 font-semibold"
+                    : isAuthorized && sessionMode === "demo"
                     ? "text-emerald-400 font-semibold"
+                    : lastError
+                    ? "text-rose-400 font-semibold"
                     : isConnected
                     ? "text-cyan-400"
                     : "text-rose-400 font-semibold"
                 }
               >
-                {isAuthorized ? "AUTHORIZED (DEMO)" : isConnected ? "CONNECTED" : "OFFLINE"}
+                {connectionLabel}
               </span>
 
               {/* Botão Conectar / Reconectar */}
@@ -157,9 +179,11 @@ export const Header: React.FC<HeaderProps> = ({
 
             {/* Account Balance */}
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-dark-700 border border-dark-600 text-xs font-mono">
-              <span className="text-gray-400">SALDO DEMO:</span>
+              <span className={isSimulated ? "text-amber-300" : "text-gray-400"}>{balanceLabel}:</span>
               <span className="text-white font-bold text-sm">
-                US$ {balance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {hasBalance
+                  ? `US$ ${balance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                  : "—"}
               </span>
             </div>
 
@@ -199,6 +223,20 @@ export const Header: React.FC<HeaderProps> = ({
               <span>{confirmPanic ? "CONFIRMAR PÂNICO!" : "BOTÃO DE PÂNICO"}</span>
             </button>
           </div>
+          {(lastError || isSimulated) && (
+            <div className="w-full mt-2 space-y-2">
+              {isSimulated && (
+                <div className="px-3 py-2 rounded border border-amber-500/50 bg-amber-950/40 text-amber-200 text-xs font-mono">
+                  SIMULADOR OPT-IN: nenhuma ordem é enviada à Deriv. WIN/LOSS deste modo são locais e estão marcados como [SIMULADOR].
+                </div>
+              )}
+              {lastError && (
+                <div className="px-3 py-2 rounded border border-rose-500/50 bg-rose-950/40 text-rose-200 text-xs font-mono">
+                  {lastError}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </header>
 
@@ -211,7 +249,7 @@ export const Header: React.FC<HeaderProps> = ({
               <h3 className="font-bold font-mono text-sm uppercase">Conectar Conta DEMO da Deriv</h3>
             </div>
             <p className="text-xs text-gray-400 font-mono mb-4">
-              Insira o API Token da sua conta virtual (VRTC...) para autorizar o WebSocket e receber ticks em tempo real:
+              Insira um PAT de conta DEMO (pat_...) com escopo trade. Token só de conta real é recusado e não vira simulador:
             </p>
             <form onSubmit={handleManualTokenSubmit} className="space-y-4">
               <input

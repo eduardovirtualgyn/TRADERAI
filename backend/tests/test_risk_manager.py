@@ -83,3 +83,63 @@ def test_consecutive_losses_limit_and_auto_kill_switch(risk_manager: RiskManager
     # Nova tentativa de trade deve ser sumariamente bloqueada
     decision = risk_manager.evaluate_trade(stake=1.00, net_ev_ratio=0.05)
     assert decision.approved is False
+
+
+def test_one_dollar_stake_survives_single_loss_on_small_demo():
+    """1% de US$ 99 é US$ 0,99 e travava para sempre o stake de US$ 1."""
+    manager = RiskManager(
+        max_stake_usd=5.00,
+        max_stake_percent=0.01,
+        max_consecutive_losses=3,
+        max_daily_loss_usd=25.00,
+        initial_balance_usd=100.00,
+    )
+    manager.record_trade_result(won=False, pnl_usd=-1.00, stake_used=1.00)
+    assert manager.balance_usd == pytest.approx(99.00)
+    decision = manager.evaluate_trade(stake=1.00, net_ev_ratio=0.05)
+    assert decision.approved is True, decision.reason
+
+
+def test_kill_switch_disarm_resets_loss_streak_and_drawdown():
+    """Desarmar não pode deixar o robô preso nas 3 derrotas que armaram a trava."""
+    manager = RiskManager(
+        max_stake_usd=5.00,
+        max_stake_percent=0.05,
+        max_consecutive_losses=3,
+        max_daily_loss_usd=25.00,
+        initial_balance_usd=1000.00,
+    )
+    for _ in range(3):
+        manager.record_trade_result(won=False, pnl_usd=-1.00, stake_used=1.00)
+
+    assert manager.kill_switch_active is True
+    assert manager.consecutive_losses == 3
+    assert manager.daily_drawdown_usd == pytest.approx(3.00)
+
+    manager.set_kill_switch(False)
+    assert manager.kill_switch_active is False
+    assert manager.consecutive_losses == 0
+    assert manager.daily_drawdown_usd == pytest.approx(0.00)
+    assert manager.circuit_breaker.is_active() is False
+
+    decision = manager.evaluate_trade(stake=1.00, net_ev_ratio=0.05)
+    assert decision.approved is True, decision.reason
+
+
+def test_daily_drawdown_resets_on_utc_date_change():
+    """O drawdown do dia zera na virada UTC, senão o teto bloqueia para sempre."""
+    from datetime import date
+
+    manager = RiskManager(
+        max_stake_usd=5.00,
+        max_stake_percent=0.05,
+        max_consecutive_losses=3,
+        max_daily_loss_usd=25.00,
+        initial_balance_usd=1000.00,
+    )
+    manager.daily_drawdown_usd = 25.00
+    manager._drawdown_utc_date = date(2020, 1, 1)
+
+    decision = manager.evaluate_trade(stake=1.00, net_ev_ratio=0.05)
+    assert manager.daily_drawdown_usd == pytest.approx(0.00)
+    assert decision.approved is True, decision.reason

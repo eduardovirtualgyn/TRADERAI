@@ -85,7 +85,8 @@ export const RiskControlPanel: React.FC<RiskControlPanelProps> = ({ riskStatus, 
             />
           </div>
           <p className="text-[10px] text-gray-500 font-mono mt-1.5">
-            {drawdownPercent.toFixed(1)}% do limite máximo diário consumido
+            {drawdownPercent.toFixed(1)}% do limite. O contador zera na virada UTC
+            {riskStatus?.drawdown_utc_date ? ` (${riskStatus.drawdown_utc_date})` : ""}.
           </p>
         </div>
 
@@ -111,7 +112,7 @@ export const RiskControlPanel: React.FC<RiskControlPanelProps> = ({ riskStatus, 
             })}
           </div>
           <p className="text-[10px] text-gray-500 font-mono mt-1.5">
-            Dispara Kill Switch automático ao atingir {maxConsecutiveLosses} derrotas
+            Dispara Kill Switch ao atingir {maxConsecutiveLosses} derrotas. Desarmar zera a sequência e o drawdown do dia.
           </p>
         </div>
 

@@ -5,6 +5,7 @@ dimensionamento fracionário de Kelly e prevenção da ruína matemática da con
 """
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import List, Optional
 import numpy as np
 
@@ -41,6 +42,7 @@ class RiskManager:
         self,
         max_stake_usd: float = 5.00,
         max_stake_percent: float = 0.01,
+        min_operable_stake_usd: float = 1.00,
         max_consecutive_losses: int = 3,
         max_daily_loss_usd: float = 25.00,
         ban_martingale: bool = True,
@@ -50,6 +52,7 @@ class RiskManager:
     ):
         self.max_stake_usd = float(max_stake_usd)
         self.max_stake_percent = float(max_stake_percent)
+        self.min_operable_stake_usd = float(min_operable_stake_usd)
         self.max_consecutive_losses = int(max_consecutive_losses)
         self.max_daily_loss_usd = float(max_daily_loss_usd)
         self.ban_martingale = bool(ban_martingale)
@@ -57,6 +60,7 @@ class RiskManager:
         # Estado dinâmico da conta
         self.balance_usd = float(initial_balance_usd)
         self.daily_drawdown_usd = 0.0
+        self._drawdown_utc_date = datetime.now(timezone.utc).date()
         self.consecutive_losses = 0
         self.last_trade_won: Optional[bool] = None
         self.last_stake_usd: Optional[float] = None
@@ -76,13 +80,28 @@ class RiskManager:
         )
 
     def set_kill_switch(self, active: bool, reason: str = "") -> None:
-        """Arma ou desarma o Kill Switch manualmente ou por evento de segurança."""
+        """Arma ou desarma o Kill Switch manualmente ou por evento de segurança.
+
+        O desarme zera as perdas consecutivas e o drawdown do dia. Sem isso o
+        robô continuava bloqueado até o processo reiniciar.
+        """
         self.kill_switch_active = active
-        self.kill_switch_reason = reason if active else None
         if active:
+            self.kill_switch_reason = reason
             logger.warning("🚨 KILL SWITCH ATIVADO: %s", reason)
-        else:
-            logger.info("✅ KILL SWITCH DESARMADO MANUALMENTE.")
+            return
+
+        previous_losses = self.consecutive_losses
+        previous_drawdown = self.daily_drawdown_usd
+        self.kill_switch_reason = None
+        self.consecutive_losses = 0
+        self.daily_drawdown_usd = 0.0
+        self.circuit_breaker.reset()
+        logger.info(
+            "✅ KILL SWITCH DESARMADO. Perdas consecutivas %d -> 0 e drawdown diário US$ %.2f -> 0.",
+            previous_losses,
+            previous_drawdown,
+        )
 
     def evaluate_trade(
         self,
@@ -91,6 +110,7 @@ class RiskManager:
         raise_on_violation: bool = False,
     ) -> RiskDecision:
         """Avalia se uma ordem proposta cumpre todos os critérios de risco."""
+        self._roll_daily_drawdown()
         # 1. Verificação do Kill Switch
         if self.kill_switch_active:
             reason = f"Kill Switch ATIVO: {self.kill_switch_reason or 'Intervenção preventiva'}"
@@ -152,12 +172,17 @@ class RiskManager:
                 raise RiskLimitExceededError(reason)
             return self._decision(False, reason, stake)
 
-        # 8. Teto Proporcional à Banca
-        allowed_by_balance = self.balance_usd * self.max_stake_percent
-        if stake > allowed_by_balance:
+        # 8. Teto proporcional à banca, com piso operável.
+        # 1% de US$ 99 é US$ 0,99 e travava para sempre o stake de US$ 1 depois
+        # de uma única derrota numa demo de US$ 100. O piso (padrão US$ 1) mantém
+        # esse stake legal enquanto a banca e o teto absoluto o cobrirem.
+        allowed_by_balance = self._max_stake_allowed_by_balance()
+        if stake > allowed_by_balance + 1e-9:
             reason = (
                 f"Stake de ${stake:.2f} excede o limite proporcional de {self.max_stake_percent:.1%} "
-                f"da banca atual (${self.balance_usd:.2f} -> máx permitido: ${allowed_by_balance:.2f})."
+                f"da banca atual (${self.balance_usd:.2f} -> máx permitido: ${allowed_by_balance:.2f}, "
+                f"piso operável US$ {self.min_operable_stake_usd:.2f}). "
+                "Ajuste RISK_MAX_STAKE_PERCENT, RISK_MIN_OPERABLE_STAKE_USD ou o stake."
             )
             if raise_on_violation:
                 raise RiskLimitExceededError(reason)
@@ -186,6 +211,7 @@ class RiskManager:
 
     def record_trade_result(self, won: bool, pnl_usd: float, stake_used: float) -> None:
         """Atualiza os contadores de risco após a resolução oficial de um contrato."""
+        self._roll_daily_drawdown()
         self.balance_usd += pnl_usd
         self.last_stake_usd = stake_used
         self.last_trade_won = won
@@ -239,9 +265,26 @@ class RiskManager:
         return float(abs(min(0.0, q5)))
 
     def reset_daily_drawdown(self) -> None:
-        """Reinicia os contadores diários (virada de dia UTC)."""
+        """Reinicia os contadores diários (virada de dia UTC ou comando explícito)."""
         logger.info("Reiniciando contador de drawdown diário.")
         self.daily_drawdown_usd = 0.0
+        self._drawdown_utc_date = datetime.now(timezone.utc).date()
+
+    def _roll_daily_drawdown(self) -> None:
+        """Zera o drawdown quando a data UTC muda. O kill switch, se armado, permanece."""
+        today = datetime.now(timezone.utc).date()
+        if self._drawdown_utc_date == today:
+            return
+        previous = self.daily_drawdown_usd
+        self.daily_drawdown_usd = 0.0
+        self._drawdown_utc_date = today
+        if previous > 0:
+            logger.info("Virada do dia UTC: drawdown diário zerado (era US$ %.2f).", previous)
+
+    def _max_stake_allowed_by_balance(self) -> float:
+        percent_cap = self.balance_usd * self.max_stake_percent
+        floor = min(self.min_operable_stake_usd, self.max_stake_usd, max(self.balance_usd, 0.0))
+        return max(percent_cap, floor)
 
     def get_status(self) -> dict:
         """Retorna o snapshot do estado de risco para auditoria e telemetria."""
@@ -258,6 +301,8 @@ class RiskManager:
             "max_consecutive_losses": self.max_consecutive_losses,
             "max_stake_usd": self.max_stake_usd,
             "max_stake_percent": self.max_stake_percent,
+            "min_operable_stake_usd": self.min_operable_stake_usd,
+            "drawdown_utc_date": self._drawdown_utc_date.isoformat(),
             "ban_martingale": self.ban_martingale,
             "kill_switch_active": self.kill_switch_active,
             "kill_switch_reason": self.kill_switch_reason,

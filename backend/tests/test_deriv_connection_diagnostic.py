@@ -87,12 +87,12 @@ def test_classify_tls_ssl_handshake_failure():
 
 def test_token_sanitization_security():
     """Garante que tokens nunca são expostos em texto claro nos logs ou serializações."""
-    raw_token = "pat_3d3166daa98c3ec98dd22eb12c71296f4657321122f60f715fbf5571b615d13d"
+    raw_token = "pat_example_not_a_real_token_0000zzzz"
     masked = sanitize_token(raw_token)
-    assert masked.startswith("pat_3d")
-    assert masked.endswith("d13d")
+    assert masked.startswith("pat_ex")
+    assert masked.endswith("zzzz")
     assert "..." in masked
-    assert "98dd22eb" not in masked
+    assert "not_a_real" not in masked
 
     assert sanitize_token(None) == "[NENHUM]"
     assert sanitize_token("123") == "****"
@@ -214,6 +214,11 @@ def test_api_connect_success_demo_account():
     mock_client.is_connected = True
     mock_client.demo_token = "token123"
     mock_client.state = DerivConnectionState.AUTHORIZED
+    mock_client.is_simulated = False
+    mock_client.is_authorized = True
+    mock_client.session_mode = "demo"
+    mock_client.trading_channel = "legacy"
+    mock_client.last_error = None
 
     async def fake_authorize(token=None):
         return DerivAuthorizeResponse(

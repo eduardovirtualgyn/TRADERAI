@@ -47,6 +47,10 @@ class AutoTraderEngine:
         self.last_action_timestamp: Optional[float] = None
         self.active_contract_id: Optional[str] = None
         self.is_executing_trade: bool = False
+        self.settlement_blocked: bool = False
+        self._last_mismatch_key: Optional[tuple] = None
+        self._resubscribe_symbol: Optional[str] = None
+        self._resubscribe_at: float = 0.0
 
         # Estatísticas da sessão
         self.total_trades: int = 0
@@ -71,9 +75,21 @@ class AutoTraderEngine:
             logger.info("🟡 AUTO-TRADER PAUSADO.")
 
     def update_config(self, config: AutoTraderConfig) -> None:
-        """Atualiza os parâmetros de operação."""
+        """Atualiza os parâmetros de operação e reassinatura o símbolo se ele mudou."""
+        previous_symbol = self.config.symbol
         self.config = config
+        self._last_mismatch_key = None
         logger.info("Configurações do Auto-Trader atualizadas: %s", config.model_dump())
+        if config.symbol != previous_symbol:
+            self.last_decision = (
+                f"Símbolo alterado de {previous_symbol} para {config.symbol}. Reassinando o feed de ticks."
+            )
+            logger.warning(
+                "Símbolo do Auto-Trader mudou de %s para %s. Reassinando ticks.",
+                previous_symbol,
+                config.symbol,
+            )
+            self._schedule_resubscribe(config.symbol)
 
     def get_status(self) -> AutoTraderStatusResponse:
         """Retorna o snapshot de telemetria do Auto-Trader."""
@@ -101,8 +117,13 @@ class AutoTraderEngine:
                 self.state = "STOPPED"
             return
 
-        # Verifica se o símbolo do tick coincide com o configurado
+        if self.settlement_blocked:
+            self.state = "PAUSED_BY_RISK"
+            return
+
+        # Símbolo divergente: não ignora em silêncio. Avisa e reassinatura o configurado.
         if tick.symbol != self.config.symbol:
+            self._handle_symbol_mismatch(tick.symbol)
             return
 
         # 1. Salvaguardas Críticas Imediatas
@@ -160,11 +181,12 @@ class AutoTraderEngine:
             )
             return
 
-        # Filtro de confiança mínima configurada
-        if signal.estimated_probability < self.config.min_probability:
+        # Filtro de confiança mínima configurada.
+        # StrategySignal expõe estimated_prob — o nome antigo derrubava todo tick.
+        if signal.estimated_prob < self.config.min_probability:
             self.state = "SEARCHING_EDGE"
             self.last_decision = (
-                f"Probabilidade ({signal.estimated_probability:.1%}) abaixo do mínimo configurado ({self.config.min_probability:.1%})"
+                f"Probabilidade ({signal.estimated_prob:.1%}) abaixo do mínimo configurado ({self.config.min_probability:.1%})"
             )
             return
 
@@ -180,7 +202,7 @@ class AutoTraderEngine:
         self.state = "EXECUTING"
         self.last_action_timestamp = now
         self.last_decision = (
-            f"🎯 SINAL DETECTADO: {signal.direction.value} | P={signal.estimated_probability:.1%}, "
+            f"🎯 SINAL DETECTADO: {signal.direction.value} | P={signal.estimated_prob:.1%}, "
             f"Wilson={signal.confidence_lower_bound:.1%}. Disparando ordem autônoma..."
         )
         logger.info("🚀 [AUTO-TRADER] %s", self.last_decision)
@@ -201,7 +223,7 @@ class AutoTraderEngine:
                 stake=self.config.stake,
                 duration=1,
                 duration_unit="t",
-                estimated_probability=signal.estimated_probability,
+                estimated_probability=signal.estimated_prob,
                 wilson_lower_bound=signal.confidence_lower_bound,
                 strategy_name="auto_trader_ai",
             )
@@ -214,8 +236,10 @@ class AutoTraderEngine:
 
             cid = exec_res.contract_id
             self.active_contract_id = cid
+            simulated = str(cid).startswith("SIM_")
+            label = "[SIMULADOR] " if simulated else ""
             self.last_decision = (
-                f"Ordem #{cid} enviada ({contract_type} US$ {self.config.stake:.2f}). Aguardando fechamento..."
+                f"{label}Ordem #{cid} enviada ({contract_type} US$ {self.config.stake:.2f}). Aguardando fechamento..."
             )
             logger.info("✅ [AUTO-TRADER] Ordem submetida com sucesso! Contract ID: %s", cid)
 
@@ -223,12 +247,14 @@ class AutoTraderEngine:
             settled = await self._wait_settlement(cid, contract_type, timeout_seconds=12.0)
             if settled:
                 self.total_trades += 1
+                simulated = str(cid).startswith("SIM_")
+                label = "[SIMULADOR] " if simulated else ""
                 if settled.net_pnl > 0:
                     self.won_trades += 1
-                    self.last_decision = f"🏆 VITÓRIA no contrato #{cid}! Lucro: +US$ {settled.net_pnl:.2f}"
+                    self.last_decision = f"{label}🏆 VITÓRIA no contrato #{cid}! Lucro: +US$ {settled.net_pnl:.2f}"
                 else:
                     self.lost_trades += 1
-                    self.last_decision = f"📉 DERROTA no contrato #{cid}. PnL: -US$ {abs(settled.net_pnl):.2f}"
+                    self.last_decision = f"{label}📉 DERROTA no contrato #{cid}. PnL: -US$ {abs(settled.net_pnl):.2f}"
                 self.session_pnl += settled.net_pnl
                 logger.info("🏁 [AUTO-TRADER] %s | PnL Sessão: US$ %.2f", self.last_decision, self.session_pnl)
 
@@ -280,13 +306,48 @@ class AutoTraderEngine:
             except Exception as poll_err:
                 logger.debug("Tentativa de consulta de contrato %s: %s", contract_id, poll_err)
 
-        # Fallback de segurança (simulador ou rede): liquida usando o último tick do buffer
-        logger.info("Liquidando contrato %s via verificação do último tick do buffer...", contract_id)
-        latest_tick = self.tick_collector.buffer.get_latest()
-        exit_digit = latest_tick.last_digit if latest_tick else 0
-        won = (exit_digit % 2 == 0) if contract_type == "DIGITEVEN" else (exit_digit % 2 != 0)
-        return self.executor.settle_contract(
-            contract_id=contract_id,
-            won=won,
-            exit_digit=exit_digit,
+        # Contrato real sem resposta da Deriv: não inventar WIN/LOSS.
+        message = (
+            f"ERRO: contrato #{contract_id} não foi liquidado pela Deriv em {timeout_seconds:.0f}s. "
+            "Nenhuma vitória ou derrota foi inventada. Novas ordens pausadas até a consulta funcionar."
         )
+        logger.error(message)
+        self.last_decision = message
+        self.settlement_blocked = True
+        self.state = "PAUSED_BY_RISK"
+        return None
+
+    def _handle_symbol_mismatch(self, incoming_symbol: str) -> None:
+        """Avisa em log e na telemetria, e pede o feed do símbolo configurado."""
+        key = (incoming_symbol, self.config.symbol)
+        if self._last_mismatch_key != key:
+            self._last_mismatch_key = key
+            message = (
+                f"Símbolo divergente: ticks de {incoming_symbol} enquanto o robô opera {self.config.symbol}. "
+                "Reassinando o feed configurado."
+            )
+            logger.warning(message)
+            self.last_decision = message
+            self.state = "SEARCHING_EDGE"
+        self._schedule_resubscribe(self.config.symbol)
+
+    def _schedule_resubscribe(self, symbol: str) -> None:
+        now = time.time()
+        if self._resubscribe_symbol == symbol and (now - self._resubscribe_at) < 5.0:
+            return
+        self._resubscribe_symbol = symbol
+        self._resubscribe_at = now
+
+        async def _go() -> None:
+            try:
+                await self.deriv_client.subscribe_ticks(symbol)
+                logger.info("Feed de ticks reassinado para %s.", symbol)
+            except Exception as exc:
+                self.last_decision = f"Falha ao reassinar ticks de {symbol}: {exc}"
+                logger.error("Falha ao reassinar ticks de %s: %s", symbol, exc)
+
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(_go())
+        except RuntimeError:
+            logger.error("Sem event loop para reassinar ticks de %s.", symbol)

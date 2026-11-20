@@ -222,7 +222,12 @@ class ContractExecutor:
         self.risk_manager.record_trade_result(won=won, pnl_usd=pnl, stake_used=stake)
         if hasattr(self.deriv_client, "update_balance"):
             try:
-                self.deriv_client.update_balance(pnl)
+                self.deriv_client.update_balance(pnl, stake=stake, payout=payout, won=won)
+            except TypeError:
+                try:
+                    self.deriv_client.update_balance(pnl)
+                except Exception as bal_err:
+                    logger.warning("Falha ao atualizar saldo no cliente Deriv: %s", bal_err)
             except Exception as bal_err:
                 logger.warning("Falha ao atualizar saldo no cliente Deriv: %s", bal_err)
 

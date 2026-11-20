@@ -31,7 +31,7 @@ def toggle_auto_trader(
 
 
 @router.post("/configure", summary="Atualiza os parâmetros do Auto-Trader")
-def configure_auto_trader(
+async def configure_auto_trader(
     config: AutoTraderConfig,
     auto_trader: AutoTraderEngine = Depends(get_auto_trader),
 ) -> AutoTraderStatusResponse:
