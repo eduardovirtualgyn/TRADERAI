@@ -185,7 +185,7 @@ def test_authorize_safeguard_blocks_real_account():
 
 def test_client_initial_state():
     """Valida estado inicial e propriedades do cliente."""
-    client = DerivWebSocketClient(ws_url="wss://ws.derivws.com/websockets/v3", app_id=1089)
+    client = DerivWebSocketClient(ws_url="wss://ws.derivws.com/websockets/v3", app_id="1089")
     assert client.state == DerivConnectionState.DISCONNECTED
     assert client.is_connected is False
     assert client.is_authorized is False

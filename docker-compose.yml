@@ -22,7 +22,7 @@ services:
       - DATABASE_URL=postgresql://deriv_user:deriv_pass@postgres:5432/deriv_trader
       - REDIS_URL=redis://redis:6379/0
       - DERIV_DEMO_TOKEN=${DERIV_DEMO_TOKEN:-}
-      - DERIV_APP_ID=${DERIV_APP_ID:-1089}
+      - DERIV_APP_ID=${DERIV_APP_ID:-}
       - DERIV_WS_URL=${DERIV_WS_URL:-wss://api.derivws.com/trading/v1/options/ws/public}
       - DERIV_REST_BASE_URL=${DERIV_REST_BASE_URL:-https://api.derivws.com}
       - DERIV_DEFAULT_SYMBOL=${DERIV_DEFAULT_SYMBOL:-R_100}
@@ -67,8 +67,10 @@ services:
       POSTGRES_USER: deriv_user
       POSTGRES_PASSWORD: deriv_pass
       POSTGRES_DB: deriv_trader
-    ports:
-      - "${POSTGRES_PORT:-5433}:5432"
+    # Não publicar o Postgres no host. A aplicação fala com ele na rede Docker.
+    # Porta publicada pelo Docker ignora o ufw. Para depurar só nesta máquina:
+    # ports:
+    #   - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -83,8 +85,9 @@ services:
     image: redis:7-alpine
     container_name: odd_even_ai_redis
     restart: unless-stopped
-    ports:
-      - "${REDIS_PORT:-6380}:6379"
+    # Não publicar o Redis no host. Mesma regra do Postgres.
+    # ports:
+    #   - "127.0.0.1:${REDIS_PORT:-6380}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
