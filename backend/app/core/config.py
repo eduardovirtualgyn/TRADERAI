@@ -40,6 +40,14 @@ class Settings(BaseModel):
     # Segurança e Conta (DEMO ONLY)
     app_name: str = Field(default="ODD_EVEN_AI_TRADER", description="Nome da aplicação")
     app_env: str = Field(default="development", description="Ambiente de execução")
+    trader_api_token: Optional[str] = Field(
+        default=None,
+        description="Segredo do operador. Obrigatório em produção. Não é o token da Deriv.",
+    )
+    cors_allow_origins: str = Field(
+        default="",
+        description="Origens CORS separadas por vírgula. `*` é ignorado.",
+    )
     account_mode: str = Field(
         default="DEMO",
         description="Modo da conta. OBRIGATÓRIO: 'DEMO'. Conta real terminantemente proibida.",
@@ -197,6 +205,8 @@ def load_settings_from_env() -> Settings:
     raw_kwargs = {
         "app_name": os.getenv("APP_NAME", "ODD_EVEN_AI_TRADER"),
         "app_env": os.getenv("APP_ENV", "development"),
+        "trader_api_token": os.getenv("TRADER_API_TOKEN"),
+        "cors_allow_origins": os.getenv("CORS_ALLOW_ORIGINS", ""),
         "account_mode": account_mode,
         "allow_real_account": allow_real,
         "deriv_ws_url": os.getenv(

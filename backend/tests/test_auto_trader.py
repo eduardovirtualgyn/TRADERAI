@@ -202,12 +202,18 @@ async def test_auto_trader_executes_and_settles(test_setup):
     assert "VITÓRIA" in engine.last_decision
 
 
-def test_auto_trader_api():
+def test_auto_trader_api(monkeypatch):
+    monkeypatch.setenv("TRADER_API_TOKEN", "test-operator-token")
+    monkeypatch.setenv("APP_ENV", "development")
+    from backend.app.core.config import get_settings
+
+    get_settings.cache_clear()
     app = create_app()
     client = TestClient(app)
+    headers = {"Authorization": "Bearer test-operator-token"}
 
     # 1. Status inicial
-    res = client.get("/api/v1/auto-trader/status")
+    res = client.get("/api/v1/auto-trader/status", headers=headers)
     assert res.status_code == 200
     data = res.json()
     assert "enabled" in data
@@ -215,7 +221,7 @@ def test_auto_trader_api():
     assert "total_trades" in data
 
     # 2. Toggle Ligar
-    res_toggle = client.post("/api/v1/auto-trader/toggle", json={"enabled": True})
+    res_toggle = client.post("/api/v1/auto-trader/toggle", json={"enabled": True}, headers=headers)
     assert res_toggle.status_code == 200
     assert res_toggle.json()["enabled"] is True
 
@@ -230,15 +236,17 @@ def test_auto_trader_api():
             "min_wilson_lower_bound": 0.51,
             "cooldown_seconds": 3.0,
         },
+        headers=headers,
     )
     assert res_cfg.status_code == 200
     assert res_cfg.json()["stake"] == 2.0
     assert res_cfg.json()["cooldown_seconds"] == 3.0
 
     # 4. Toggle Desligar
-    res_off = client.post("/api/v1/auto-trader/toggle", json={"enabled": False})
+    res_off = client.post("/api/v1/auto-trader/toggle", json={"enabled": False}, headers=headers)
     assert res_off.status_code == 200
     assert res_off.json()["enabled"] is False
+    get_settings.cache_clear()
 
 
 @pytest.mark.asyncio

@@ -5,8 +5,10 @@ from typing import AsyncGenerator
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from backend.app.api.operator_middleware import OperatorAuthMiddleware
 from backend.app.api.v1.router import api_v1_router
 from backend.app.core.config import get_settings
+from backend.app.core.operator_auth import ensure_production_operator_token, parse_cors_origins
 from backend.app.core.errors import (
     AntiMartingaleViolationError,
     KillSwitchActiveError,
@@ -34,6 +36,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if settings.account_mode != "DEMO" or settings.allow_real_account:
         logger.critical("🚨 FALHA CRÍTICA DE SEGURANÇA: Tentativa de iniciar em modo não-DEMO.")
         raise TraderSecurityError("Operação bloqueada: apenas o modo DEMO é permitido.")
+
+    ensure_production_operator_token(settings)
+    if settings.trader_api_token:
+        logger.info("🔐 Autenticação do operador ativa. O token não é registrado no log.")
+    else:
+        logger.warning(
+            "TRADER_API_TOKEN ausente. Mutações da API ficam recusadas. "
+            "Em APP_ENV=production o processo nem chega aqui."
+        )
 
     # Conexão automática em segundo plano com a Deriv API (não-bloqueante)
     connect_task = None
@@ -130,13 +141,18 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Middleware CORS
+    # CORS sem curinga. O painel fala com /api/backend no mesmo host, então
+    # a lista pode ficar vazia. Credencial de cookie não é usada.
+    origins = parse_cors_origins(settings.cors_allow_origins)
+    if "*" in (settings.cors_allow_origins or ""):
+        logger.warning("CORS_ALLOW_ORIGINS contém '*', que foi ignorado. Informe origens explícitas.")
+    app.add_middleware(OperatorAuthMiddleware)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Trader-Token", "Accept"],
     )
 
     # Handlers Globais para Exceções do Domínio de Risco e Segurança

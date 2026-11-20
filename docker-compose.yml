@@ -7,9 +7,16 @@ services:
       dockerfile: Dockerfile
     container_name: odd_even_ai_backend
     restart: unless-stopped
-    ports:
-      - "${BACKEND_PORT:-8001}:8000"
+    # A API não é publicada no host. O browser fala só com o frontend, que
+    # faz proxy em /api/backend pela rede Docker (http://backend:8000).
+    # Publicar 8001 em 0.0.0.0 deixa a API na internet, e porta publicada
+    # pelo Docker não passa pelo ufw. Para depurar na própria VPS, no máximo:
+    # ports:
+    #   - "127.0.0.1:${BACKEND_PORT:-8001}:8000"
     environment:
+      - APP_ENV=${APP_ENV:-production}
+      - TRADER_API_TOKEN=${TRADER_API_TOKEN:-}
+      - CORS_ALLOW_ORIGINS=${CORS_ALLOW_ORIGINS:-}
       - ACCOUNT_MODE=DEMO
       - ALLOW_REAL_ACCOUNT=False
       - DATABASE_URL=postgresql://deriv_user:deriv_pass@postgres:5432/deriv_trader
@@ -46,6 +53,7 @@ services:
       - "${FRONTEND_PORT:-3000}:3000"
     environment:
       - BACKEND_INTERNAL_URL=http://backend:8000/api/v1
+      - TRADER_API_TOKEN=${TRADER_API_TOKEN:-}
     depends_on:
       - backend
     networks:
