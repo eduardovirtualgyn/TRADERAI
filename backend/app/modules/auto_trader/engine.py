@@ -65,6 +65,7 @@ class AutoTraderEngine:
     def set_enabled(self, enabled: bool) -> None:
         """Ativa ou desativa o robô autônomo."""
         self.config.enabled = enabled
+        self.settlement_blocked = False
         if enabled:
             self.state = "SEARCHING_EDGE"
             self.last_decision = "Radar autônomo ativo. Monitorando ticks e calculando anomalias estatísticas..."
@@ -73,6 +74,22 @@ class AutoTraderEngine:
             self.state = "STOPPED"
             self.last_decision = "Robô autônomo pausado pelo operador."
             logger.info("🟡 AUTO-TRADER PAUSADO.")
+
+    def reset_stats(self) -> None:
+        """Zera contadores de trades da sessão e PnL acumulado do robô autônomo."""
+        self.total_trades = 0
+        self.won_trades = 0
+        self.lost_trades = 0
+        self.session_pnl = 0.0
+        self.settlement_blocked = False
+        self.last_action_timestamp = None
+        self.state = "SEARCHING_EDGE" if self.config.enabled else "STOPPED"
+        self.last_decision = (
+            "Sessão resetada pelo operador. Radar autônomo ativo."
+            if self.config.enabled
+            else "Sessão resetada. Robô pausado."
+        )
+        logger.info("🔄 [AUTO-TRADER] Estatísticas da sessão resetadas pelo operador.")
 
     def update_config(self, config: AutoTraderConfig) -> None:
         """Atualiza os parâmetros de operação e reassinatura o símbolo se ele mudou."""
@@ -210,11 +227,21 @@ class AutoTraderEngine:
         )
         logger.info("🚀 [AUTO-TRADER] %s", self.last_decision)
 
+        coro = self._execute_and_settle(signal)
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(self._execute_and_settle(signal))
+            if loop.is_running():
+                loop.create_task(coro)
+            else:
+                try:
+                    coro.send(None)
+                except StopIteration:
+                    pass
         except RuntimeError:
-            asyncio.run(self._execute_and_settle(signal))
+            try:
+                coro.send(None)
+            except StopIteration:
+                pass
 
     async def _execute_and_settle(self, signal) -> None:
         """Executa a ordem na Deriv e acompanha a liquidação até o encerramento."""
@@ -253,6 +280,7 @@ class AutoTraderEngine:
                 self.total_trades += 1
                 simulated = str(cid).startswith("SIM_")
                 label = "[SIMULADOR] " if simulated else ""
+                is_loss = settled.net_pnl <= 0
                 if settled.net_pnl > 0:
                     self.won_trades += 1
                     self.last_decision = f"{label}🏆 VITÓRIA no contrato #{cid}! Lucro: +US$ {settled.net_pnl:.2f}"
@@ -261,6 +289,10 @@ class AutoTraderEngine:
                     self.last_decision = f"{label}📉 DERROTA no contrato #{cid}. PnL: -US$ {abs(settled.net_pnl):.2f}"
                 self.session_pnl += settled.net_pnl
                 logger.info("🏁 [AUTO-TRADER] %s | PnL Sessão: US$ %.2f", self.last_decision, self.session_pnl)
+                if is_loss:
+                    # Aplica resfriamento pós-perda de 10s para aguardar quebra de clusters adversos
+                    self.last_action_timestamp = time.time() + 10.0
+                    logger.info("🛡️ [AUTO-TRADER] Resfriamento pós-perda de 10s ativado para segurança.")
 
         except Exception as exc:
             logger.exception("Erro durante ciclo do Auto-Trader: %s", exc)
@@ -268,7 +300,8 @@ class AutoTraderEngine:
         finally:
             self.active_contract_id = None
             self.is_executing_trade = False
-            self.last_action_timestamp = time.time()
+            if self.last_action_timestamp is None or self.last_action_timestamp < time.time():
+                self.last_action_timestamp = time.time()
 
     async def _wait_settlement(
         self,

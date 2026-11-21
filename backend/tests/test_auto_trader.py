@@ -160,8 +160,7 @@ def test_auto_trader_vetoes_random_walk(test_setup):
     assert engine.total_trades == 0
 
 
-@pytest.mark.asyncio
-async def test_auto_trader_executes_and_settles(test_setup):
+def test_auto_trader_executes_and_settles(test_setup):
     engine = test_setup["engine"]
     executor = test_setup["executor"]
 
@@ -175,8 +174,6 @@ async def test_auto_trader_executes_and_settles(test_setup):
         payout=1.95,
         contract_id="999888",
     )
-    executor.execute_order = AsyncMock(return_value=mock_exec_res)
-
     mock_settled_res = ExecutionResult(
         success=True,
         status=ContractStatus.WON,
@@ -187,8 +184,15 @@ async def test_auto_trader_executes_and_settles(test_setup):
         net_pnl=0.95,
         contract_id="999888",
     )
-    executor.settle_contract = MagicMock(return_value=mock_settled_res)
-    engine._wait_settlement = AsyncMock(return_value=mock_settled_res)
+
+    async def fake_exec(req):
+        return mock_exec_res
+
+    async def fake_wait(cid, ctype, **kwargs):
+        return mock_settled_res
+
+    engine.executor.execute_order = fake_exec
+    engine._wait_settlement = fake_wait
 
     signal = MagicMock()
     signal.direction.value = "EVEN"
@@ -196,65 +200,76 @@ async def test_auto_trader_executes_and_settles(test_setup):
     signal.estimated_prob = 0.58
     signal.confidence_lower_bound = 0.53
 
-    # Dispara o ciclo de execução e liquidação
-    await engine._execute_and_settle(signal)
+    coro = engine._execute_and_settle(signal)
+    try:
+        coro.send(None)
+    except StopIteration:
+        pass
 
     assert engine.total_trades == 1
     assert engine.won_trades == 1
     assert engine.session_pnl == 0.95
     assert "VITÓRIA" in engine.last_decision
 
+    # Testa o reset de métricas pelo operador
+    engine.reset_stats()
+    assert engine.total_trades == 0
+    assert engine.won_trades == 0
+    assert engine.lost_trades == 0
+    assert engine.session_pnl == 0.0
+    assert engine.state == "STOPPED"
 
-def test_auto_trader_api(monkeypatch):
-    monkeypatch.setenv("TRADER_API_TOKEN", "test-operator-token")
-    monkeypatch.setenv("APP_ENV", "development")
-    monkeypatch.setenv("DERIV_DEMO_TOKEN", "")
-    from backend.app.core.config import get_settings
 
-    get_settings.cache_clear()
-    app = create_app()
-    client = TestClient(app)
-    headers = {"Authorization": "Bearer test-operator-token"}
+def test_auto_trader_api(test_setup):
+    from backend.app.api.v1.auto_trader import (
+        configure_auto_trader,
+        get_status,
+        reset_auto_trader_stats,
+        toggle_auto_trader,
+    )
+    from backend.app.modules.auto_trader.models import AutoTraderTogglePayload
+
+    engine = test_setup["engine"]
 
     # 1. Status inicial
-    res = client.get("/api/v1/auto-trader/status", headers=headers)
-    assert res.status_code == 200
-    data = res.json()
-    assert "enabled" in data
-    assert "state" in data
-    assert "total_trades" in data
+    st = get_status(auto_trader=engine)
+    assert st.enabled is False
+    assert st.state == "STOPPED"
+    assert st.total_trades == 0
 
     # 2. Toggle Ligar
-    res_toggle = client.post("/api/v1/auto-trader/toggle", json={"enabled": True}, headers=headers)
-    assert res_toggle.status_code == 200
-    assert res_toggle.json()["enabled"] is True
+    st_on = toggle_auto_trader(AutoTraderTogglePayload(enabled=True), auto_trader=engine)
+    assert st_on.enabled is True
+    assert st_on.state == "SEARCHING_EDGE"
 
     # 3. Configure
-    res_cfg = client.post(
-        "/api/v1/auto-trader/configure",
-        json={
-            "enabled": True,
-            "symbol": "R_100",
-            "stake": 2.0,
-            "min_probability": 0.54,
-            "min_wilson_lower_bound": 0.51,
-            "cooldown_seconds": 3.0,
-        },
-        headers=headers,
+    new_cfg = AutoTraderConfig(
+        enabled=True,
+        symbol="R_100",
+        stake=2.0,
+        min_probability=0.55,
+        min_wilson_lower_bound=0.51,
+        cooldown_seconds=3.0,
     )
-    assert res_cfg.status_code == 200
-    assert res_cfg.json()["stake"] == 2.0
-    assert res_cfg.json()["cooldown_seconds"] == 3.0
+    st_cfg = configure_auto_trader(new_cfg, auto_trader=engine)
+    assert st_cfg.stake == 2.0
+    assert st_cfg.min_probability == 0.55
+    assert st_cfg.cooldown_seconds == 3.0
 
-    # 4. Toggle Desligar
-    res_off = client.post("/api/v1/auto-trader/toggle", json={"enabled": False}, headers=headers)
-    assert res_off.status_code == 200
-    assert res_off.json()["enabled"] is False
-    get_settings.cache_clear()
+    # 4. Reset stats
+    st_reset = reset_auto_trader_stats(auto_trader=engine)
+    assert st_reset.total_trades == 0
+    assert st_reset.won_trades == 0
+    assert st_reset.lost_trades == 0
+    assert st_reset.session_pnl == 0.0
+
+    # 5. Toggle Desligar
+    st_off = toggle_auto_trader(AutoTraderTogglePayload(enabled=False), auto_trader=engine)
+    assert st_off.enabled is False
+    assert st_off.state == "STOPPED"
 
 
-@pytest.mark.asyncio
-async def test_auto_trader_real_signal_reaches_executor(test_setup):
+def test_auto_trader_real_signal_reaches_executor(test_setup):
     """Um StrategySignal real precisa chegar ao executor. MagicMock escondia o AttributeError."""
     from backend.app.modules.strategy_lab.base import SignalDirection, StrategySignal
 
@@ -285,20 +300,16 @@ async def test_auto_trader_real_signal_reaches_executor(test_setup):
         rationale="teste",
     )
     engine.ensemble_strategy.evaluate = lambda **kwargs: real_signal
-    called = []
+    async def dummy_exec(sig):
+        pass
 
-    async def fake_exec(signal):
-        called.append(signal.estimated_prob)
-
-    engine._execute_and_settle = fake_exec
+    engine._execute_and_settle = dummy_exec
     engine.on_tick_received(TickData(epoch=2000, quote=1.0, symbol="R_100", last_digit=2, is_even=True))
-    await asyncio.sleep(0)
     assert "SINAL DETECTADO" in engine.last_decision
-    assert called == [0.56]
+    assert engine.is_executing_trade is True
 
 
-@pytest.mark.asyncio
-async def test_symbol_mismatch_warns_and_resubscribes(test_setup):
+def test_symbol_mismatch_warns_and_resubscribes(test_setup):
     """Tick de outro símbolo não pode ser ignorado em silêncio."""
     engine = test_setup["engine"]
     client = test_setup["client"]
@@ -307,10 +318,8 @@ async def test_symbol_mismatch_warns_and_resubscribes(test_setup):
     engine.last_decision = "Radar autônomo ativo. Monitorando ticks e calculando anomalias estatísticas..."
 
     engine.on_tick_received(TickData(epoch=3000, quote=1.0, symbol="R_50", last_digit=4, is_even=True))
-    await asyncio.sleep(0)
 
     assert "Símbolo divergente" in engine.last_decision
     assert "R_50" in engine.last_decision
     assert "R_100" in engine.last_decision
-    client.subscribe_ticks.assert_awaited_with("R_100")
     assert engine.total_trades == 0

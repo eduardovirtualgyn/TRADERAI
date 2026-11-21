@@ -35,8 +35,9 @@ export const ContractExecutionPanel: React.FC<ContractExecutionPanelProps> = ({
 }) => {
   const [activeContracts, setActiveContracts] = useState<any[]>([]);
   const [isTogglingAuto, setIsTogglingAuto] = useState(false);
+  const [isUnlocking, setIsUnlocking] = useState(false);
   const [autoStake, setAutoStake] = useState<number>(autoTrader?.stake || 1.0);
-  const [autoMinProb, setAutoMinProb] = useState<number>(autoTrader?.min_probability || 0.52);
+  const [autoMinProb, setAutoMinProb] = useState<number>(autoTrader?.min_probability || 0.55);
   const [showAutoSettings, setShowAutoSettings] = useState(false);
 
   // Sincroniza stake e probabilidade caso o autoTrader atualize via polling
@@ -73,6 +74,25 @@ export const ContractExecutionPanel: React.FC<ContractExecutionPanelProps> = ({
       alert("Erro ao alternar Auto-Trader: " + (err.message || err));
     } finally {
       setIsTogglingAuto(false);
+    }
+  };
+
+  const handleUnlockRisk = async () => {
+    setIsUnlocking(true);
+    try {
+      // 1. Desarma Kill Switch (zera contagem de perdas consecutivas e drawdown acumulado)
+      await api.toggleKillSwitch(false, "Desbloqueio manual e reset de salvaguardas pelo operador");
+      // 2. Reseta o Circuit Breaker temporal se estiver ativo
+      await api.resetCircuitBreaker();
+      // 3. Zera os contadores da sessão no robô
+      await api.resetAutoTraderStats();
+      // 4. Garante que o Auto-Trader esteja ativado
+      await api.toggleAutoTrader(true);
+      onTradeExecuted();
+    } catch (err: any) {
+      alert("Erro ao desbloquear risco: " + (err.message || err));
+    } finally {
+      setIsUnlocking(false);
     }
   };
 
@@ -159,36 +179,41 @@ export const ContractExecutionPanel: React.FC<ContractExecutionPanelProps> = ({
               <span>Parâmetros</span>
             </button>
 
-            <button
-              onClick={handleToggleAutoTrader}
-              disabled={isTogglingAuto || isBlocked}
-              className={`flex-1 sm:flex-none px-5 py-2.5 rounded-lg font-mono font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-lg ${
-                isBlocked
-                  ? "bg-dark-700 border border-dark-600 text-gray-500 cursor-not-allowed"
-                  : isAutoEnabled
-                  ? "bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/50 hover:border-rose-400"
-                  : "bg-emerald-500 hover:bg-emerald-400 text-dark-900 font-extrabold shadow-emerald-500/20 hover:shadow-emerald-500/40"
-              }`}
-            >
-              {isTogglingAuto ? (
-                <span>ATUALIZANDO...</span>
-              ) : isBlocked ? (
-                <>
-                  <ShieldAlert className="w-4 h-4 text-rose-500" />
-                  <span>BLOQUEADO POR RISCO</span>
-                </>
-              ) : isAutoEnabled ? (
-                <>
-                  <span className="w-2.5 h-2.5 rounded-full bg-rose-400" />
-                  <span>PAUSAR ROBÔ</span>
-                </>
-              ) : (
-                <>
-                  <Zap className="w-4 h-4 fill-current" />
-                  <span>LIGAR AUTO-TRADER</span>
-                </>
-              )}
-            </button>
+            {isBlocked ? (
+              <button
+                onClick={handleUnlockRisk}
+                disabled={isUnlocking}
+                className="flex-1 sm:flex-none px-5 py-2.5 rounded-lg font-mono font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-lg bg-rose-600 hover:bg-rose-500 text-white animate-pulse border border-rose-400 cursor-pointer shadow-rose-950/40"
+                title="Desarma o Kill Switch, zera derrotas consecutivas e reinicia o robô autônomo"
+              >
+                <ShieldAlert className="w-4 h-4 text-white" />
+                <span>{isUnlocking ? "DESBLOQUEANDO..." : "DESBLOQUEAR RISCO & REATIVAR"}</span>
+              </button>
+            ) : (
+              <button
+                onClick={handleToggleAutoTrader}
+                disabled={isTogglingAuto}
+                className={`flex-1 sm:flex-none px-5 py-2.5 rounded-lg font-mono font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-lg ${
+                  isAutoEnabled
+                    ? "bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/50 hover:border-rose-400"
+                    : "bg-emerald-500 hover:bg-emerald-400 text-dark-900 font-extrabold shadow-emerald-500/20 hover:shadow-emerald-500/40"
+                }`}
+              >
+                {isTogglingAuto ? (
+                  <span>ATUALIZANDO...</span>
+                ) : isAutoEnabled ? (
+                  <>
+                    <span className="w-2.5 h-2.5 rounded-full bg-rose-400" />
+                    <span>PAUSAR ROBÔ</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-4 h-4 fill-current" />
+                    <span>LIGAR AUTO-TRADER</span>
+                  </>
+                )}
+              </button>
+            )}
           </div>
         </div>
 
@@ -216,10 +241,10 @@ export const ContractExecutionPanel: React.FC<ContractExecutionPanelProps> = ({
                 max="90"
                 step="1"
                 value={Math.round(autoMinProb * 100)}
-                onChange={(e) => setAutoMinProb((parseFloat(e.target.value) || 52) / 100)}
+                onChange={(e) => setAutoMinProb((parseFloat(e.target.value) || 55) / 100)}
                 className="w-full bg-dark-800 border border-dark-600 rounded px-3 py-1.5 text-white font-bold focus:border-cyan-400 focus:outline-none"
               />
-              <span className="text-[10px] text-gray-500">Recomendado: 52% a 55% (Break-even teórico: 51.3%)</span>
+              <span className="text-[10px] text-gray-500">Recomendado: 55% a 65% (Break-even real Deriv: 52.1%)</span>
             </div>
             <div className="flex items-end">
               <button
@@ -307,11 +332,24 @@ export const ContractExecutionPanel: React.FC<ContractExecutionPanelProps> = ({
         </div>
 
         {/* Ticker de Telemetria / Decisão Algorítmica em Tempo Real */}
-        <div className="mt-3 p-2.5 bg-dark-950 rounded border border-dark-700 font-mono text-[11px] flex items-center gap-2 overflow-hidden">
-          <span className="text-cyan-400 font-bold shrink-0">&gt; TELEMETRIA:</span>
-          <span className="text-gray-300 truncate">
-            {autoTrader?.last_decision || "Aguardando inicialização do feed..."}
-          </span>
+        <div className="mt-3 p-2.5 bg-dark-950 rounded border border-dark-700 font-mono text-[11px] flex items-center justify-between gap-2 overflow-hidden">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-cyan-400 font-bold shrink-0">&gt; TELEMETRIA:</span>
+            <span className={`truncate ${isBlocked ? "text-rose-400 font-bold" : "text-gray-300"}`}>
+              {autoTrader?.last_decision || "Aguardando inicialização do feed..."}
+            </span>
+          </div>
+          {isBlocked && (
+            <button
+              onClick={handleUnlockRisk}
+              disabled={isUnlocking}
+              className="shrink-0 px-2.5 py-1 bg-rose-500 hover:bg-rose-400 text-white font-bold rounded text-[10px] uppercase tracking-wider transition-all flex items-center gap-1 shadow cursor-pointer animate-pulse"
+              title="Desarma o Kill Switch e zera a contagem de perdas"
+            >
+              <RefreshCw className={`w-3 h-3 ${isUnlocking ? "animate-spin" : ""}`} />
+              <span>Desbloquear Risco</span>
+            </button>
+          )}
         </div>
       </div>
 

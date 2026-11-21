@@ -162,4 +162,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify(config),
     }),
+  resetAutoTraderStats: () =>
+    fetchJson<AutoTraderStatus>("/auto-trader/reset-stats", {
+      method: "POST",
+    }),
 };

@@ -86,9 +86,9 @@ class ModelEnsemble:
                     curr_streak += 1
                 else:
                     break
-            if curr_streak >= 2:
-                # Com streak >= 2, há forte pressão estatística de reversão à média
-                p_revert = min(0.64, 0.50 + (curr_streak * 0.04))
+            if curr_streak >= 3:
+                # Com streak >= 3, há probabilidade estatística de reversão à média
+                p_revert = min(0.65, 0.51 + ((curr_streak - 2) * 0.04))
                 streak_p_even = (1.0 - p_revert) if last_even else p_revert
                 predictions_even["streak_reversion"] = streak_p_even
                 brier_scores["streak_reversion"] = max(0.06, 0.25 - (curr_streak * 0.03))

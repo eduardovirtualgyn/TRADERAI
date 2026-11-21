@@ -15,7 +15,7 @@ class AutoTraderConfig(BaseModel):
         le=100.0,
         description="Stake por operação em USD. O teto efetivo continua sendo RISK_MAX_STAKE_USD.",
     )
-    min_probability: float = Field(default=0.52, ge=0.50, le=0.90, description="Probabilidade mínima calculada")
+    min_probability: float = Field(default=0.55, ge=0.50, le=0.90, description="Probabilidade mínima calculada")
     min_wilson_lower_bound: float = Field(default=0.51, ge=0.50, le=0.85, description="Limite inferior de Wilson mínimo")
     cooldown_seconds: float = Field(default=2.0, ge=1.0, le=60.0, description="Intervalo mínimo entre trades em segundos")
 

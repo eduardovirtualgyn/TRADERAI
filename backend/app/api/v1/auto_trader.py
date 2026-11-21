@@ -31,10 +31,19 @@ def toggle_auto_trader(
 
 
 @router.post("/configure", summary="Atualiza os parâmetros do Auto-Trader")
-async def configure_auto_trader(
+def configure_auto_trader(
     config: AutoTraderConfig,
     auto_trader: AutoTraderEngine = Depends(get_auto_trader),
 ) -> AutoTraderStatusResponse:
     """Configura símbolo, stake por trade, probabilidade mínima e cooldown."""
     auto_trader.update_config(config)
+    return auto_trader.get_status()
+
+
+@router.post("/reset-stats", summary="Zera as estatísticas da sessão do Auto-Trader")
+def reset_auto_trader_stats(
+    auto_trader: AutoTraderEngine = Depends(get_auto_trader),
+) -> AutoTraderStatusResponse:
+    """Zera contagem de trades, vitórias, derrotas e lucro acumulado na sessão."""
+    auto_trader.reset_stats()
     return auto_trader.get_status()
